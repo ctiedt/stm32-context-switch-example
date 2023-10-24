@@ -1,14 +1,18 @@
 #![no_std]
 #![no_main]
 #![feature(
-    const_maybe_uninit_uninit_array,
-    maybe_uninit_uninit_array,
-    const_maybe_uninit_array_assume_init,
-    maybe_uninit_array_assume_init
+const_maybe_uninit_uninit_array,
+maybe_uninit_uninit_array,
+const_maybe_uninit_array_assume_init,
+maybe_uninit_array_assume_init,
+naked_functions
 )]
 
 use core::mem::MaybeUninit;
 use core::{fmt::Write, panic::PanicInfo};
+use core::ptr::null;
+use cortex_m::delay::Delay;
+use cortex_m::interrupt::{CriticalSection, Mutex};
 
 use cortex_m::register::control::Control;
 use cortex_m_rt::{entry, exception};
@@ -38,7 +42,7 @@ fn panic_handler(info: &PanicInfo) -> ! {
             location.line(),
             location.column()
         )
-        .unwrap();
+            .unwrap();
     }
     if let Some(s) = info.payload().downcast_ref::<&str>() {
         writeln!(uart, "{}\r", s).unwrap();
@@ -53,6 +57,7 @@ struct TaskTable {
 }
 
 impl TaskTable {
+    /// Create a new TaskTable without any tasks.
     const fn new() -> Self {
         let tasks = MaybeUninit::uninit_array();
         Self {
@@ -83,6 +88,7 @@ enum TaskState {
     Active,
 }
 
+#[repr(C)]
 struct Task {
     stack_pointer: *const (),
     handler: fn(*const ()) -> *const (),
@@ -90,44 +96,18 @@ struct Task {
     state: TaskState,
 }
 
-fn os_task_init(
-    handler: fn(*const ()) -> *const (),
-    params: *const (),
-    stack: *mut (),
-    stack_size: usize,
-) {
-    let stack_offset = stack_size / core::mem::size_of::<usize>();
-
-    let task = Task {
-        stack_pointer: unsafe { (stack as *const u8).add(stack_offset - 16) as *const () },
-        handler,
-        params,
-        state: TaskState::Idle,
-    };
-
-    unsafe { TASK_TABLE.insert_task(task) };
-
-    unsafe {
-        stack
-            .cast::<usize>()
-            .add(stack_offset - 1)
-            .write(0x01000000);
-
-        stack
-            .cast::<usize>()
-            .add(stack_offset - 2)
-            .write(handler as usize & !0x01);
-
-        stack
-            .cast::<usize>()
-            .add(stack_offset - 3)
-            .write(task_finished as _);
-
-        stack
-            .cast::<usize>()
-            .add(stack_offset - 8)
-            .write(params as _);
-    };
+impl Task {
+    /// Create a new task from the current calling context.
+    /// **Note:** Do not call this twice! Data is invalid and must be written to before being
+    /// red.
+    fn from_context() -> Self {
+        Self {
+            stack_pointer: null(),
+            handler: |_| &{ task_finished() } as _,
+            params: 0 as _,
+            state: TaskState::Active,
+        }
+    }
 }
 
 fn task_finished() {
@@ -137,48 +117,41 @@ fn task_finished() {
 static mut OS_CURRENT_TASK: *mut Task = core::ptr::null_mut();
 static mut OS_NEXT_TASK: *mut Task = core::ptr::null_mut();
 
-#[exception]
+#[naked]
+#[no_mangle]
+#[allow(non_snake_case)]
 fn PendSV() {
-    let uart = unsafe { UART.as_mut() }.unwrap();
-    writeln!(uart, "Hello from PendSV\r").unwrap();
-    writeln!(uart, "{}\r", cortex_m::register::psp::read()).unwrap();
-
-    cortex_m::interrupt::free(|_| unsafe {
+    // let uart = unsafe { UART.as_mut() }.unwrap();
+    // writeln!(uart, "Hello from PendSV\r").unwrap();
+    // writeln!(uart, "{}\r", cortex_m::register::psp::read()).unwrap();
+    unsafe {
         core::arch::asm!(
-            // Save registers R4-R11
-            "mrs r0, psp",
-            "subs r0, #16",
-            "stmia r0!, {{r4-r7}}",
-            "mov r4, r8",
-            "mov r5, r9",
-            "mov r6, r10",
-            "mov r7, r11",
-            "subs r0, #32",
-            "stmia r0!, {{r4-r7}}",
-            "subs r0, #16",
-            // Save current task's sp
-            "ldr r2, ={0}",
-            "ldr r1, [r2]",
-            "str r0, [r1]",
-            // Load next task's sp
-            "ldr r2, ={1}",
-            "ldr r1, [r2]",
-            "ldr r0, [r1]",
-            // Load registers R4-R11 for new task
-            "ldmia r0!, {{r4-r7}}",
-            "mov r8, r4",
-            "mov r9, r5",
-            "mov r10, r6",
-            "mov r11, r7",
-            "ldmia r0!, {{r4-r7}}",
-            "msr psp, r0",
-            // Return from ISR
-            "ldr r0, =0xFFFFFFFD",
-            "bx r0",
-            sym OS_CURRENT_TASK,
-            sym OS_NEXT_TASK
+        // 1. Save r4-r11
+        "push {{r4-r11}}",
+
+        // 2. Save stack pointer to task control block
+        "ldr r0, ={0}", // Load address of OS_CURRENT_TASK into r0
+        "ldr r0, [r0]", // Load contents of OS_CURRENT_TASK into r0
+        "str SP, [r0]", // Store stack pointer into TSB
+
+        "ldr SP, =0xDEADBEEF",
+
+        // 3. Load next stack pointer from next TSB
+        "ldr r0, ={1}", // Load address of OS_NEXT_TASK into r0
+        "ldr r0, [r0]", // Load contents of OS_NEXT_TASK into r0
+        "ldr SP, [r0]", // Store stack pointer into TSB
+
+        // 4. Restore r4-r11
+        "pop {{r4-r11}}",
+
+        // 5. Return in thread mode
+        "ldr r0, =0xFFFFFFFD",
+        "bx r0",
+        sym OS_CURRENT_TASK,
+        sym OS_NEXT_TASK,
+        options(noreturn),
         )
-    });
+    };
 }
 
 #[exception]
@@ -201,11 +174,13 @@ fn delay(mut time: u32) {
     }
 }
 
+
 fn task_handler(params: *const ()) -> *const () {
+    let id = params as i32;
     loop {
         cortex_m::interrupt::free(|_| {
             let uart = unsafe { UART.as_mut() }.unwrap();
-            writeln!(uart, "Hello from task {:?}\r", unsafe { OS_CURRENT_TASK }).unwrap();
+            writeln!(uart, "Hello from task {:?} with id {}\r", unsafe { OS_CURRENT_TASK }, id).unwrap();
             let led = unsafe { LED.as_mut() }.unwrap();
             led.toggle();
         });
@@ -232,38 +207,14 @@ fn main() -> ! {
         Config::default().baudrate(9600.bps()),
         &clocks,
     )
-    .unwrap();
+        .unwrap();
     unsafe { UART.replace(tx) };
 
     let uart = unsafe { UART.as_mut() }.unwrap();
     writeln!(uart, "Setting up tasks\r").unwrap();
 
-    let stack0 = [0u32; 128];
-    let stack1 = [0u32; 128];
-    let stack2 = [0u32; 128];
-
-    let p0 = 200000;
-    let p1 = p0 / 2;
-    let p2 = p0 / 4;
-
-    os_task_init(
-        task_handler as _,
-        p0 as _,
-        stack0.as_ptr() as _,
-        core::mem::size_of_val(&stack0),
-    );
-    os_task_init(
-        task_handler as _,
-        p1 as _,
-        stack1.as_ptr() as _,
-        core::mem::size_of_val(&stack0),
-    );
-    os_task_init(
-        task_handler as _,
-        p2 as _,
-        stack2.as_ptr() as _,
-        core::mem::size_of_val(&stack0),
-    );
+    let main_task = Task::from_context();
+    unsafe { TASK_TABLE.insert_task(main_task) };
 
     let uart = unsafe { UART.as_mut() }.unwrap();
     writeln!(uart, "Set up tasks\r").unwrap();
