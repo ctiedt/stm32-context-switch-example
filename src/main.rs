@@ -13,15 +13,13 @@ use core::{fmt::Write, panic::PanicInfo};
 use core::ptr::null;
 use cortex_m::delay::Delay;
 use cortex_m::interrupt::{CriticalSection, Mutex};
+use cortex_m::peripheral::NVIC;
 
-use cortex_m::register::control::Control;
+use cortex_m::register::control::{Control, Npriv, Spsel};
 use cortex_m_rt::{entry, exception};
-use stm32f4xx_hal::{
-    gpio::{gpioa, Output, PushPull},
-    pac::{self, USART2},
-    prelude::*,
-    serial::{Config, Serial, Tx},
-};
+use stm32f4xx_hal::{gpio::{gpioa, Output, PushPull}, interrupt, pac::{self, USART2}, prelude::*, serial::{Config, Serial, Tx}};
+use stm32f4xx_hal::pac::Interrupt;
+use stm32f4xx_hal::rtc::Error::InvalidInputData;
 
 static mut LED: Option<gpioa::PA5<Output<PushPull>>> = None;
 static mut UART: Option<Tx<USART2>> = None;
@@ -111,7 +109,11 @@ impl Task {
 }
 
 fn task_finished() {
-    loop {}
+    loop {
+        // let uart = unsafe { UART.as_mut() }.unwrap();
+        // writeln!(uart, "Task finished!").unwrap();
+        // delay(100000);
+    }
 }
 
 static mut OS_CURRENT_TASK: *mut Task = core::ptr::null_mut();
@@ -125,16 +127,59 @@ fn PendSV() {
     // writeln!(uart, "Hello from PendSV\r").unwrap();
     // writeln!(uart, "{}\r", cortex_m::register::psp::read()).unwrap();
     unsafe {
+        /*
+//         core::arch::asm!(
+//         "mrs r0, psp                     \n",
+//         "isb                             \n",
+//
+//         // Get the location of the current TCB.
+//         "ldr     r3, ={0}   \n",
+//         "ldr     r2, [r3]                \n",
+//
+//         // Is the task using the FPU context?  If so, push high vfp registers.
+//         // "tst r14, #0x10                  \n",
+//         // "it eq                           \n",
+//         // "vstmdbeq r0!, {s16-s31}         \n",
+// //
+//         "stmdb r0!, {r4-r11, r14}        \n", // Save the core registers.
+//         "str r0, [r2]                    \n", /* Save the new top of stack into the first member of the TCB. */
+// //
+//         "stmdb sp!, {r0, r3}             \n",
+//         "mov r0, %0                      \n",
+//         "msr basepri, r0                 \n",
+//         "dsb                             \n",
+//         "isb                             \n",
+//         "bl vTaskSwitchContext           \n",
+//         "mov r0, #0                      \n",
+//         "msr basepri, r0                 \n",
+//         "ldmia sp!, {r0, r3}             \n",
+// //
+//         "ldr r1, [r3]                    \n", /* The first item in pxCurrentTCB is the task top of stack. */
+//         "ldr r0, [r1]                    \n",
+// //
+//         "ldmia r0!, {r4-r11, r14}        \n", /* Pop the core registers. */
+// //
+//         "tst r14, #0x10                  \n", /* Is the task using the FPU context?  If so, pop the high vfp registers too. */
+//         "it eq                           \n",
+//         "vldmiaeq r0!, {s16-s31}         \n",
+// //
+//         "msr psp, r0                     \n",
+//         "isb                             \n",
+// //
+//         "bx r14                          \n",
+//         sym OS_CURRENT_TASK,
+//         sym OS_NEXT_TASK,
+//         options(noreturn)
+//         );
+*/
         core::arch::asm!(
         // 1. Save r4-r11
-        "push {{r4-r11}}",
+        "push {{r4-r11, r14}}",
 
         // 2. Save stack pointer to task control block
         "ldr r0, ={0}", // Load address of OS_CURRENT_TASK into r0
         "ldr r0, [r0]", // Load contents of OS_CURRENT_TASK into r0
         "str SP, [r0]", // Store stack pointer into TSB
-
-        "ldr SP, =0xDEADBEEF",
 
         // 3. Load next stack pointer from next TSB
         "ldr r0, ={1}", // Load address of OS_NEXT_TASK into r0
@@ -142,11 +187,11 @@ fn PendSV() {
         "ldr SP, [r0]", // Store stack pointer into TSB
 
         // 4. Restore r4-r11
-        "pop {{r4-r11}}",
+        "pop {{r4-r11, r14}}",
 
         // 5. Return in thread mode
-        "ldr r0, =0xFFFFFFFD",
-        "bx r0",
+        // "ldr r14, =0xFFFFFFFD",
+        "bx r14",
         sym OS_CURRENT_TASK,
         sym OS_NEXT_TASK,
         options(noreturn),
@@ -211,6 +256,7 @@ fn main() -> ! {
     unsafe { UART.replace(tx) };
 
     let uart = unsafe { UART.as_mut() }.unwrap();
+    writeln!(uart, "\x1b[2J\x1b[H").unwrap();
     writeln!(uart, "Setting up tasks\r").unwrap();
 
     let main_task = Task::from_context();
@@ -227,13 +273,47 @@ fn main() -> ! {
 
     unsafe { OS_CURRENT_TASK = TASK_TABLE.current_task() };
 
+    // What do these do?
+    // This sets the process stack pointer to some magic value. Maybe we need to change our approach here.
+    // When this line is executed and we return to thread mode + psp, we land in the hard fault handler.
     unsafe { cortex_m::register::psp::write((*OS_CURRENT_TASK).stack_pointer as u32 + 64) };
-    unsafe { cortex_m::register::control::write(Control::from_bits(0x1)) };
+
+    // Set threads to unprivileged mode
+    let mut control = cortex_m::register::control::read();
+    control.set_npriv(Npriv::Unprivileged);
+    // control.set_spsel(Spsel::Psp);
+    unsafe { cortex_m::register::control::write(control) };
+
+    // Flush caches, probably not needed but found in reference docs.
     cortex_m::asm::isb();
 
-    unsafe { ((*OS_CURRENT_TASK).handler)((*OS_CURRENT_TASK).params) };
+    // unsafe { ((*OS_CURRENT_TASK).handler)((*OS_CURRENT_TASK).params) };
 
     loop {
+        writeln!(uart, "Main Task loop!");
         cortex_m::asm::wfi();
     }
 }
+
+// 1. Switch to user mode (PSP, unprivileged)
+// 2. Start new tasks by generating stack frame
+// 3. Document stack, conditions, etc.
+// 4. Implement features
+
+// Motivation (why betriebssystem für Lehre?
+//     Stark genug auf Context Wechsel legen (share CPU, not memory)
+//     x86 is too complex (bootloader, real mode, cache, I/O)
+//     Build one tool that may be used for teaching
+// Platform: STM32 -> einfach! (expect comments, no MMU, no classical OS, Zweck: CTX wechsel, Übersichtlich, einfach)
+// Prozess eines CTX switch erklären
+//     Timer, PendSV, was passiert, privilegien, Stack pointer, wie sehen TBCs aus, wie sieht der Stack aus?
+// Demo!
+// Planned work:
+//     - Features
+//     - Spawn tasks
+//     - IPC / Mutex / Semaphore
+//     - MPU for Kernel/User space
+//     - Drivers for Devices with protection instead of direct hardware access
+//     - Scheduling policies
+//         - Priority Inversion solution (aging, inheritance)
+//     - Realtime?
