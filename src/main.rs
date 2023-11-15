@@ -7,11 +7,16 @@ const_maybe_uninit_array_assume_init,
 maybe_uninit_array_assume_init,
 naked_functions
 )]
+#![feature(ascii_char)]
 
 use core::{fmt::Write, panic::PanicInfo};
 use cortex_m::register::control::Npriv;
 use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{gpio::{gpioa, Output, PushPull}, pac::{self, USART2}, prelude::*, serial::{Config, Serial, Tx}};
+use stm32f4xx_hal::gpio::gpioa::Parts;
+use stm32f4xx_hal::rcc::Clocks;
+use stm32f4xx_hal::serial::config::Parity;
+use stm32f4xx_hal::serial::Rx;
 use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE, TaskState};
 
 mod dispatcher;
@@ -86,58 +91,25 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
-    let clocks = rcc.cfgr.use_hse(8.MHz()).freeze();
+    let clocks = rcc.cfgr.freeze();
+
 
     let gpioa = dp.GPIOA.split();
-    unsafe { LED.replace(gpioa.pa5.into_push_pull_output()) };
+    let tx2_pin = gpioa.pa2.into_alternate();
+    let rx2_pin = gpioa.pa3.into_alternate();
+    let usart2 = dp.USART2;
+    let config = Config::default().baudrate(9600.bps());
+    let pins = (tx2_pin, rx2_pin);
+    let mut serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
-    let uart = dp.USART2;
-    let tx = Serial::tx(
-        uart,
-        gpioa.pa2.into_alternate(),
-        Config::default().baudrate(9600.bps()),
-        &clocks,
-    )
-        .unwrap();
-    unsafe { UART.replace(tx) };
+    let mut led_pin = gpioa.pa5.into_push_pull_output();
 
-    let uart = unsafe { UART.as_mut() }.unwrap();
-    writeln!(uart, "\x1b[2J\x1b[H").unwrap();
-    writeln!(uart, "Setting up tasks\r").unwrap();
+    // todo!("Setup kernel space memory protection");
+    // todo!("Setup interrupt priorities");
 
-    let main_task = Task::from_context();
-    unsafe { TASK_TABLE.insert_task(main_task) };
+    // Hey Philipp! Here you need to start thinking about global state. Maybe you should store references to the UART in a place where the panic handler can access it?
 
-    let uart = unsafe { UART.as_mut() }.unwrap();
-    writeln!(uart, "Set up tasks\r").unwrap();
-
-    let mut syst = cp.SYST;
-    syst.set_clock_source(cortex_m::peripheral::syst::SystClkSource::Core);
-    syst.enable_counter();
-    syst.enable_interrupt();
-    syst.set_reload(8_000_000);
-
-    unsafe { OS_CURRENT_TASK = TASK_TABLE.current_task() };
-
-    // What do these do?
-    // This sets the process stack pointer to some magic value. Maybe we need to change our approach here.
-    // When this line is executed and we return to thread mode + psp, we land in the hard fault handler.
-    todo!("Switch to process stack");
-    // unsafe { cortex_m::register::psp::write((*OS_CURRENT_TASK).stack_pointer as u32 + 64) };
-
-    // Set threads to unprivileged mode
-    let mut control = cortex_m::register::control::read();
-    control.set_npriv(Npriv::Unprivileged);
-    // control.set_spsel(Spsel::Psp);
-    unsafe { cortex_m::register::control::write(control) };
-
-    // Flush caches, probably not needed but found in reference docs.
-    cortex_m::asm::isb();
-
-    // unsafe { ((*OS_CURRENT_TASK).handler)((*OS_CURRENT_TASK).params) };
-
-    loop {
-        writeln!(uart, "Main Task loop!");
-        cortex_m::asm::wfi();
-    }
+    todo!("Create new 'main' thread");
+    todo!("Load 'thread mode, unprivileged' into Link Register");
+    todo!("Switch to scheduled mode");
 }
