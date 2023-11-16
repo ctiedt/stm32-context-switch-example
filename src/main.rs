@@ -8,34 +8,38 @@ maybe_uninit_array_assume_init,
 naked_functions
 )]
 #![feature(ascii_char)]
+#![feature(panic_info_message)]
 
 use core::{fmt::Write, panic::PanicInfo};
+use cortex_m::peripheral::scb::{Exception, SystemHandler};
+use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::register::control::Npriv;
 use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{gpio::{gpioa, Output, PushPull}, pac::{self, USART2}, prelude::*, serial::{Config, Serial, Tx}};
 use stm32f4xx_hal::gpio::gpioa::Parts;
+use stm32f4xx_hal::pac::Interrupt;
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::serial::config::Parity;
-use stm32f4xx_hal::serial::Rx;
+use stm32f4xx_hal::serial::{Rx, Serial2};
 use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE, TaskState};
 
 mod dispatcher;
 mod task;
+mod global_peripherals;
 
-static mut LED: Option<gpioa::PA5<Output<PushPull>>> = None;
-static mut UART: Option<Tx<USART2>> = None;
 
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
     cortex_m::interrupt::disable();
-    let uart = unsafe { UART.as_mut() }.unwrap();
+    let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
     if let Some(location) = info.location() {
         writeln!(
             uart,
-            "{} - {}:{}\r",
+            "panicked at {} - {}:{} with message '{}'\n",
             location.file(),
             location.line(),
-            location.column()
+            location.column(),
+            info.message().unwrap()
         )
             .unwrap();
     }
@@ -58,7 +62,7 @@ fn SysTick() {
     unsafe { OS_CURRENT_TASK = TASK_TABLE.current_task() };
     unsafe { OS_NEXT_TASK = TASK_TABLE.next_task() };
 
-    let uart = unsafe { UART.as_mut() }.unwrap();
+    let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
     writeln!(uart, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
 
     cortex_m::peripheral::SCB::set_pendsv();
@@ -75,9 +79,9 @@ fn task_handler(params: *const ()) -> *const () {
     let id = params as i32;
     loop {
         cortex_m::interrupt::free(|_| {
-            let uart = unsafe { UART.as_mut() }.unwrap();
+            let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
             writeln!(uart, "Hello from task {:?} with id {}\r", unsafe { OS_CURRENT_TASK }, id).unwrap();
-            let led = unsafe { LED.as_mut() }.unwrap();
+            let led = unsafe { global_peripherals::LED.as_mut() }.unwrap();
             led.toggle();
         });
 
@@ -91,8 +95,10 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
-    let clocks = rcc.cfgr.freeze();
-
+    // ST-LINK Chip provides 8Mhz clock in default configuration
+    let clocks = rcc.cfgr
+        .use_hse(8.MHz())
+        .freeze();
 
     let gpioa = dp.GPIOA.split();
     let tx2_pin = gpioa.pa2.into_alternate();
@@ -102,10 +108,33 @@ fn main() -> ! {
     let pins = (tx2_pin, rx2_pin);
     let mut serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
+    unsafe { global_peripherals::UART = Some(serial2); }
+
     let mut led_pin = gpioa.pa5.into_push_pull_output();
+    unsafe { global_peripherals::LED = Some(led_pin); }
+
+    let serial2 = unsafe { global_peripherals::UART.as_mut().unwrap() };
+    writeln!(serial2, "Core clock is at {} Hz", clocks.hclk()).unwrap();
+    writeln!(serial2, "Clocks: {:?}", clocks).unwrap();
 
     // todo!("Setup kernel space memory protection");
     // todo!("Setup interrupt priorities");
+
+    let mut scb = cp.SCB;
+    unsafe {
+        scb.set_priority(SystemHandler::PendSV, 15);
+        scb.set_priority(SystemHandler::SVCall, 14);
+        scb.set_priority(SystemHandler::SysTick, 13);
+    }
+    writeln!(serial2, "NVIC configured!").unwrap();
+
+    let mut SYST = cp.SYST;
+    SYST.set_clock_source(SystClkSource::Core);
+    SYST.set_reload(8_000_000);
+    SYST.enable_counter();
+    SYST.enable_interrupt();
+    writeln!(serial2, "SysTick enabled!").unwrap();
+
 
     // Hey Philipp! Here you need to start thinking about global state. Maybe you should store references to the UART in a place where the panic handler can access it?
 
