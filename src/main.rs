@@ -137,7 +137,7 @@ fn main() -> ! {
 
     let mut SYST = cp.SYST;
     SYST.set_clock_source(SystClkSource::Core);
-    SYST.set_reload(8_000_000);
+    SYST.set_reload(8_000);
     SYST.enable_counter();
     SYST.enable_interrupt();
     writeln!(serial2, "SysTick enabled!").unwrap();
@@ -167,7 +167,7 @@ fn some_task() {
         let led = global_peripherals::LED.as_mut().unwrap();
         loop {
             led.toggle();
-            cortex_m::asm::wfi();
+            delay(200000);
         }
     }
 }
