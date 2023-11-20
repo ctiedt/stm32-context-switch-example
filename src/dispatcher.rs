@@ -11,7 +11,7 @@ fn PendSV() {
     unsafe {
         core::arch::asm!(
         // 1. Save r4-r11
-        "push {{r4-r11}}",
+        "push {{r4-r11, lr}}",
 
         // 2. Save stack pointer to task control block
         "ldr r0, ={0}", // Load address of OS_CURRENT_TASK into r0
@@ -28,7 +28,7 @@ fn PendSV() {
         "dsb",
 
         // 4. Restore r4-r11
-        "pop {{r4-r11}}",
+        "pop {{r4-r11, lr}}",
 
         // 5. Return in thread mode
         "ldr r14, =0xFFFFFFF9",

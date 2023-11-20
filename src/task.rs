@@ -102,7 +102,7 @@ pub(crate) fn create_task(handler: fn() -> (), params: *const (), stack: &mut [u
     push!(1);
     push!(0);
     // R4-R11 + LR (popped in reverse)
-    // push!(0xFFFFFFF9u32);
+    push!(0xFFFFFFF9u32);
     push!(11);
     push!(10);
     push!(9);
