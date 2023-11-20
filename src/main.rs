@@ -11,6 +11,7 @@ naked_functions
 #![feature(panic_info_message)]
 
 use core::{fmt::Write, panic::PanicInfo};
+use core::ptr::null;
 use cortex_m::peripheral::scb::{Exception, SystemHandler};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::register::control::Npriv;
@@ -21,7 +22,9 @@ use stm32f4xx_hal::pac::Interrupt;
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::serial::config::Parity;
 use stm32f4xx_hal::serial::{Rx, Serial2};
-use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE, TaskState};
+use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE};
+use crate::global_peripherals::UART;
+use crate::task::{create_task, initialize_scheduler, schedule_next_task};
 
 mod dispatcher;
 mod task;
@@ -59,12 +62,9 @@ fn task_finished() {
 
 #[exception]
 fn SysTick() {
-    unsafe { OS_CURRENT_TASK = TASK_TABLE.current_task() };
-    unsafe { OS_NEXT_TASK = TASK_TABLE.next_task() };
-
-    let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
-    writeln!(uart, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
-
+    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    // writeln!(serial2, "Tick!").unwrap();
+    schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
 }
 
@@ -113,7 +113,8 @@ fn main() -> ! {
     let mut led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
-    let serial2 = unsafe { global_peripherals::UART.as_mut().unwrap() };
+    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    writeln!(serial2, "Hello, world!").unwrap();
     writeln!(serial2, "Core clock is at {} Hz", clocks.hclk()).unwrap();
     writeln!(serial2, "Clocks: {:?}", clocks).unwrap();
 
@@ -128,17 +129,45 @@ fn main() -> ! {
     }
     writeln!(serial2, "NVIC configured!").unwrap();
 
+    initialize_scheduler();
+    writeln!(serial2, "Scheduler initialized!").unwrap();
+
+    unsafe { create_task(some_task, null(), &mut SOME_TASK_STACK); }
+    writeln!(serial2, "Second task created!").unwrap();
+
     let mut SYST = cp.SYST;
     SYST.set_clock_source(SystClkSource::Core);
-    SYST.set_reload(8_000_000);
+    SYST.set_reload(8_000);
     SYST.enable_counter();
     SYST.enable_interrupt();
     writeln!(serial2, "SysTick enabled!").unwrap();
+    //
+    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
+    // schedule_next_task();
+    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
+    // schedule_next_task();
+    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
 
 
     // Hey Philipp! Here you need to start thinking about global state. Maybe you should store references to the UART in a place where the panic handler can access it?
 
-    todo!("Create new 'main' thread");
+
+    loop {
+        writeln!(serial2, "Loop!").unwrap();
+        cortex_m::asm::wfi();
+    }
     todo!("Load 'thread mode, unprivileged' into Link Register");
     todo!("Switch to scheduled mode");
+}
+
+static mut SOME_TASK_STACK: [u32; 256] = [0u32; 256];
+
+fn some_task() {
+    unsafe {
+        let led = global_peripherals::LED.as_mut().unwrap();
+        loop {
+            led.toggle();
+            delay(200000);
+        }
+    }
 }
