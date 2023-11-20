@@ -63,7 +63,7 @@ fn task_finished() {
 #[exception]
 fn SysTick() {
     let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
-    // writeln!(serial2, "Tick!").unwrap();
+    writeln!(serial2, "Tick!").unwrap();
     schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
 }
@@ -137,7 +137,7 @@ fn main() -> ! {
 
     let mut SYST = cp.SYST;
     SYST.set_clock_source(SystClkSource::Core);
-    SYST.set_reload(8_000);
+    SYST.set_reload(8_000_000);
     SYST.enable_counter();
     SYST.enable_interrupt();
     writeln!(serial2, "SysTick enabled!").unwrap();
@@ -164,10 +164,12 @@ static mut SOME_TASK_STACK: [u32; 256] = [0u32; 256];
 
 fn some_task() {
     unsafe {
+        let serial2 = global_peripherals::UART.as_mut().unwrap();
         let led = global_peripherals::LED.as_mut().unwrap();
         loop {
             led.toggle();
-            delay(200000);
+            writeln!(serial2, "Task!").unwrap();
+            cortex_m::asm::wfi();
         }
     }
 }
