@@ -2,7 +2,8 @@ use cortex_m_rt::{exception, ExceptionFrame, interrupt};
 use crate::task::{OS_CURRENT_TASK, OS_NEXT_TASK};
 use crate::global_peripherals::UART;
 use core::fmt::Write;
-use stm32f4xx_hal::pac;
+use cortex_m::asm::bkpt;
+use cortex_m::peripheral::SCB;
 
 #[naked]
 #[no_mangle]
@@ -43,15 +44,19 @@ fn PendSV() {
 
 #[exception]
 unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
-    let cfsr = *(0xE000ED28 as *const u32);
+    let core_peripherals = cortex_m::peripheral::Peripherals::steal();
+    let cfsr = core_peripherals.SCB.cfsr.read();
     let usage_fault = (cfsr >> 16) as u16;
     let bus_fault = ((cfsr >> 8) & 0xff) as u8;
     let memory_fault = cfsr as u8;
-    let usart = unsafe { UART.as_mut() }.unwrap();
+
+    let usart = UART.as_mut().unwrap();
 
     writeln!(usart, "Hard Fault {:?}", frame).unwrap();
     writeln!(usart, "UFSR={:#016b}", usage_fault).unwrap();
     writeln!(usart, "BFSR={:#08b}", bus_fault).unwrap();
     writeln!(usart, "MMFSR={:#08b}", memory_fault).unwrap();
-    loop {}
+
+    // Recovery is highly unlikely, so we simply wait for a manual reset and allow debugging.
+    loop { bkpt() }
 }

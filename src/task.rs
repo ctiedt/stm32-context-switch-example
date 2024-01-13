@@ -1,7 +1,8 @@
-use core::ptr::{null, null_mut};
+use core::ptr::{null_mut};
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 use crate::global_peripherals;
-use core::fmt::Write;
+use cortex_m::register::control::{Fpca, Npriv, Spsel};
 
 pub(crate) const MAX_TASKS: usize = 8;
 
@@ -45,19 +46,21 @@ impl TaskTable {
 #[repr(C)]
 pub(crate) struct Task {
     stack_pointer: *mut u32,
-    // handler: fn(*const ()) -> *const (),
-    params: *const (),
 }
 
 impl Task {
-    /// Create a new task from the current calling context.
-    /// **Note:** Do not call this twice! Data is invalid and must be written to before being
-    /// read.
-    pub fn from_context() -> Self {
+    /// Create a new dummy Task.
+    /// Stack pointer is invalid and is assumed to be overwritten before first switch to this Task.
+    fn new_dummy() -> Self {
         Self {
-            stack_pointer: null_mut(),
-            // handler: |_| &{ unreachable!() } as _,
-            params: 0 as _,
+            stack_pointer: null_mut()
+        }
+    }
+
+    /// Create a new Task with a given stack pointer.
+    fn new(stack: *mut u32) -> Self {
+        Self {
+            stack_pointer: stack
         }
     }
 }
@@ -65,13 +68,57 @@ impl Task {
 pub(crate) static mut OS_CURRENT_TASK: *mut Task = core::ptr::null_mut();
 pub(crate) static mut OS_NEXT_TASK: *mut Task = core::ptr::null_mut();
 
-pub(crate) fn initialize_scheduler() {
+/// Hand off control to the scheduler.
+/// Sets up process stack to use provided stack, switches to unprivileged thread mode and starts
+/// execution of `entry`.
+pub(crate) fn start_scheduler(app_stack: &mut [u32], entry: impl FnOnce()) -> ! {
+    initialize_scheduler();
+
+    /// Setup process stack before switching to it.
+    /// Hopefully, we can avoid disabling interrupts for this.
+    let mut top = app_stack.as_mut_ptr_range().end as u32;
+    top = top - top % 8;
+    unsafe { cortex_m::register::psp::write(top) }
+
+    /// Switch to unprivileged thread mode without floating point.
+    let mut control = cortex_m::register::control::read();
+    if control.fpca() != Fpca::NotActive {
+        todo!("floating point mode is not supported yet")
+    }
+    control.set_spsel(Spsel::Psp);
+    control.set_npriv(Npriv::Unprivileged);
+    /// Note: [cortex_m::register::control::write] accesses stack around asm, which will not work
+    /// during stack switching.
     unsafe {
-        TASK_TABLE.insert_task(Task::from_context());
-        OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to initialize current task");
-        OS_CURRENT_TASK = OS_NEXT_TASK;
-    };
+        core::arch::asm!(
+        "msr CONTROL, {}",
+        "isb",
+        in(reg) control.bits(),
+        options(nomem, nostack, preserves_flags)
+        )
+    }
+    /// Ensure memory accesses are not reordered around the CONTROL update.
+    /// Copied from [cortex_m::register::control::write].
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
+    /// We are now in unprivileged thread mode!
+    entry();
+    panic!("unexpected return from application entry point")
 }
+
+/// Initialize scheduler structures with dummy data to allow a context switch.
+fn initialize_scheduler() {
+    /// Setup task table using a dummy task. At least one task is required for a context switch to
+    /// work, since the stack pointer is written/read to/from the last/next task.
+    let app_task = Task::new_dummy();
+    unsafe {
+        TASK_TABLE.insert_task(app_task);
+        OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to initialize dummy task");
+        // Required to have a valid reference during first scheduler run.
+        OS_CURRENT_TASK = OS_NEXT_TASK;
+    }
+}
+
 
 pub(crate) fn schedule_next_task() {
     unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
@@ -112,8 +159,7 @@ pub(crate) fn create_task(handler: fn() -> (), params: *const (), stack: &mut [u
     push!(5);
     push!(4);
 
-
-    let task = Task { stack_pointer: top, params };
+    let task = Task::new(top);
     unsafe { TASK_TABLE.insert_task(task); }
 }
 

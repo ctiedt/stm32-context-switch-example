@@ -24,7 +24,7 @@ use stm32f4xx_hal::serial::config::Parity;
 use stm32f4xx_hal::serial::{Rx, Serial2};
 use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE};
 use crate::global_peripherals::UART;
-use crate::task::{create_task, initialize_scheduler, schedule_next_task};
+use crate::task::{create_task, schedule_next_task, start_scheduler};
 
 mod dispatcher;
 mod task;
@@ -121,55 +121,34 @@ fn main() -> ! {
     // todo!("Setup kernel space memory protection");
     // todo!("Setup interrupt priorities");
 
+    /// Set priority levels of core exceptions. Lower number => higher priority.
     let mut scb = cp.SCB;
     unsafe {
+        /// PendSV must have lowest priority to allow SysTick and SVCall to interrupt it.
+        /// This way, the dispatcher (running in PendSV and performing a context switch) can be certain
+        /// that it it not interrupting another exception or interrupt and corrupt its stack.
+        /// Otherwise, we could switch away during an interrupt and block it until we switch back.
         scb.set_priority(SystemHandler::PendSV, 15);
-        scb.set_priority(SystemHandler::SVCall, 14);
-        scb.set_priority(SystemHandler::SysTick, 13);
+        /// SysTick is next, it fires periodically and schedules the next task and requests
+        /// PendSV to run after it returns.
+        scb.set_priority(SystemHandler::SysTick, 14);
+        /// Finally, SVCall. It serves as a ways to enter kernel mode and make system calls.
+        /// Its priority is higher than SysTick so that the currently active task (or the next) does
+        /// not change during handling of a system call.
+        scb.set_priority(SystemHandler::SVCall, 13);
     }
-    writeln!(serial2, "NVIC configured!").unwrap();
+    writeln!(serial2, "Exception priorities configured!").unwrap();
 
-    initialize_scheduler();
-    writeln!(serial2, "Scheduler initialized!").unwrap();
-
-    unsafe { create_task(some_task, null(), &mut SOME_TASK_STACK); }
-    writeln!(serial2, "Second task created!").unwrap();
-
-    let mut SYST = cp.SYST;
-    SYST.set_clock_source(SystClkSource::Core);
-    SYST.set_reload(8_000_000);
-    SYST.enable_counter();
-    SYST.enable_interrupt();
-    writeln!(serial2, "SysTick enabled!").unwrap();
-    //
-    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
-    // schedule_next_task();
-    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
-    // schedule_next_task();
-    // writeln!(serial2, "Curent task: {:?} Next: {:?}", unsafe { OS_CURRENT_TASK }, unsafe { OS_NEXT_TASK }).unwrap();
-
-
-    // Hey Philipp! Here you need to start thinking about global state. Maybe you should store references to the UART in a place where the panic handler can access it?
-
-
-    loop {
-        writeln!(serial2, "Loop!").unwrap();
-        cortex_m::asm::wfi();
-    }
-    todo!("Load 'thread mode, unprivileged' into Link Register");
-    todo!("Switch to scheduled mode");
+    writeln!(serial2, "Starting scheduler...").unwrap();
+    unsafe { start_scheduler(&mut APPLICATION_STACK, app) }
 }
 
-static mut SOME_TASK_STACK: [u32; 256] = [0u32; 256];
 
-fn some_task() {
-    unsafe {
-        let serial2 = global_peripherals::UART.as_mut().unwrap();
-        let led = global_peripherals::LED.as_mut().unwrap();
-        loop {
-            led.toggle();
-            writeln!(serial2, "Task!").unwrap();
-            cortex_m::asm::wfi();
-        }
-    }
+/// Size of application stack in words (4 bytes).
+const APP_STACK_SIZE: usize = 1280usize;
+/// Application stack used after switch to scheduler.
+static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
+
+fn app() {
+    todo!("app")
 }
