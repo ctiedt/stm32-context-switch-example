@@ -1,99 +1,12 @@
-//! System Calls are implemented here.
-//!
-//! ## How it works:
-//! Users call the respective safe functions with fitting arguments.
-//! Internally, parameters are converted to u32 and stored in an array of fitting size.
-//! The length and pointer to this array are stored in R0 and R1 and an `svc <number>` instruction
-//! is executed where `<number>` is a constant unique to this system call.
-//! R2 contains a pointer to a result u32 indicating success.
-//!
-//! The `svc` instruction triggers the [SVCall] exception handler, which looks at the stack to determine
-//! length and pointer to the arguments and calls [handle_syscall] with the call number.
-//! This function decodes the number into the appropriate action and passes along the parameters.
-//! The challenge here lies in determining proper calling convention for [SVCall] to [handle_syscall]
-//! for arguments and return values.
+//! Kernel-side code for system calls.
+//! Deals with reading call number and arguments from stack and executing the actual calls.
 
-
-
-
-/// Internal representation of system calls.
-#[derive(Debug)]
-enum SyscallNumber {
-    Increment,
-}
-
-/// Possible error during syscall.
-#[derive(Debug)]
-pub enum Error {
-    Unknown = 1,
-}
-
-impl TryFrom<u32> for Error {
-    type Error = ();
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            x if x == Self::Unknown as u32 => Ok(Self::Unknown),
-            _other => Err(())
-        }
-    }
-}
-
-#[derive(Debug)]
-#[repr(u32)]
-enum InternalError {
-    BadNumber(u8),
-}
-
-impl TryFrom<u8> for SyscallNumber {
-    type Error = InternalError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            x if x == Self::Increment as u8 => Ok(Self::Increment),
-            other => Err(InternalError::BadNumber(other))
-        }
-    }
-}
-
-
-pub mod stub {
-    use super::*;
-
-    /// Increment `value` by one and return it.
-    pub fn increment(value: u32) -> Result<u32, Error> {
-        // Status code and value.
-        let mut args = [0, value];
-        let count = args.len() as u32;
-        let pointer = args.as_mut_ptr() as u32;
-        unsafe {
-            core::arch::asm!(
-            // Setup count and pointer to argument array.
-            "mov r0, {count}",
-            "mov r1, {pointer}",
-            // Execute system call.
-            "svc {number}",
-            count = in(reg) count,
-            pointer = in(reg) pointer,
-            number = const SyscallNumber::Increment as u32,
-            out("r0") _,
-            out("r1") _,
-            );
-        }
-
-        // Return code in args[0] indicates success.
-        if args[0] == 0 {
-            Ok(args[1])
-        } else {
-            Err(args[0].try_into().expect("syscall failed with an invalid error code"))
-        }
-    }
-}
+use super::Error;
 
 #[naked]
 #[no_mangle]
 #[allow(non_snake_case)]
-unsafe fn SVCall() {
+pub unsafe fn SVCall() {
     /// Link Register decoding
     /// F1 = 1 0001 = Handler, No FP, MSP
     /// F9 = 1 1001 = Thread, No FP, MSP
@@ -137,7 +50,7 @@ unsafe fn SVCall() {
 }
 
 /// Decodes number and arguments for syscall from stack and calls corresponding handler.
-unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
+pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
     let number = get_syscall_number(stack_pointer).expect("invalid syscall number");
     let args = get_syscall_arguments(stack_pointer);
     let (result, args) = args.split_at_mut(1);
@@ -157,7 +70,7 @@ unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
 }
 
 /// Extract syscall number from return address on stack.
-unsafe fn get_syscall_number(stack_pointer: *const u32) -> Result<SyscallNumber, InternalError> {
+unsafe fn get_syscall_number(stack_pointer: *const u32) -> Option<SyscallNumber> {
     /// Return address lies at 7th (index 6) position on the stack. Read it.
     /// It is a pointer to a 16 bit thumb instruction.
     let return_address = *stack_pointer.add(6) as *const u16;
@@ -167,7 +80,7 @@ unsafe fn get_syscall_number(stack_pointer: *const u32) -> Result<SyscallNumber,
     /// Call number is first byte of this instruction.
     /// https://developer.arm.com/documentation/ddi0419/c/Application-Level-Architecture/The-Thumb-Instruction-Set-Encoding/16-bit-Thumb-instruction-encoding/Conditional-branch--and-Supervisor-Call?lang=en
     let number = *svc_address.add(0);
-    number.try_into()
+    SyscallNumber::from(number)
 }
 
 /// Extract syscall arguments from count and pointer on stack.
@@ -180,4 +93,19 @@ unsafe fn get_syscall_arguments(stack_pointer: *const u32) -> &'static mut [u32]
 unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), Error> {
     args[0] += 1;
     Ok(())
+}
+
+/// Internal representation of system calls.
+#[derive(Debug)]
+pub(super) enum SyscallNumber {
+    Increment,
+}
+
+impl SyscallNumber {
+    pub fn from(imm: u8) -> Option<Self> {
+        match imm {
+            x if x == Self::Increment as u8 => Some(Self::Increment),
+            _ => None
+        }
+    }
 }
