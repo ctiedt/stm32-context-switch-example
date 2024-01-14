@@ -10,9 +10,9 @@ naked_functions
 #![feature(ascii_char)]
 #![feature(panic_info_message)]
 #![feature(asm_const)]
+#![feature(never_type)]
 
 use core::{fmt::Write, panic::PanicInfo};
-use core::ptr::null;
 use cortex_m::peripheral::scb::{Exception, SystemHandler};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::register::control::Npriv;
@@ -151,7 +151,12 @@ const APP_STACK_SIZE: usize = 1280usize;
 /// Application stack used after switch to scheduler.
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
-fn app() {
-    let r = syscalls::stub::increment(10).unwrap();
-    loop {}
+fn app() -> ! {
+    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    writeln!(serial2, "Hello from App!").unwrap();
+    let mut i = 0;
+    loop {
+        writeln!(serial2, "i={}", i).unwrap();
+        i = syscalls::stub::increment(i).unwrap();
+    }
 }

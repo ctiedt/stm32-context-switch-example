@@ -71,7 +71,7 @@ pub(crate) static mut OS_NEXT_TASK: *mut Task = core::ptr::null_mut();
 /// Hand off control to the scheduler.
 /// Sets up process stack to use provided stack, switches to unprivileged thread mode and starts
 /// execution of `entry`.
-pub(crate) fn start_scheduler(app_stack: &mut [u32], entry: impl FnOnce()) -> ! {
+pub(crate) fn start_scheduler(app_stack: &mut [u32], entry: impl FnOnce() -> !) -> ! {
     initialize_scheduler();
 
     /// Setup process stack before switching to it.
@@ -102,8 +102,8 @@ pub(crate) fn start_scheduler(app_stack: &mut [u32], entry: impl FnOnce()) -> ! 
     core::sync::atomic::compiler_fence(Ordering::SeqCst);
 
     /// We are now in unprivileged thread mode!
-    entry();
-    panic!("unexpected return from application entry point")
+    /// Call our main thread.
+    entry()
 }
 
 /// Initialize scheduler structures with dummy data to allow a context switch.

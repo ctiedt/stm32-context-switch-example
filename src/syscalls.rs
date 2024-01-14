@@ -131,12 +131,6 @@ unsafe fn SVCall() {
     "bl      {handle_syscall}",
     "add     sp, #8",
     "pop     {{r7, pc}}",
-    // // Read call number by looking at the return address on the stack.
-    // // Load return address (at SP+6 words) into R0.
-    // "ldr r0, [r3, #(6*4)]",
-    // // Load number of svc instruction into r0.
-    // // Offset -2 was found experimentally.
-    // "ldrb r0, [r0, #-2]",
     handle_syscall = sym handle_syscall,
     options(noreturn)
     )
