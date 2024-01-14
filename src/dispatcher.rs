@@ -3,7 +3,6 @@ use crate::task::{OS_CURRENT_TASK, OS_NEXT_TASK};
 use crate::global_peripherals::UART;
 use core::fmt::Write;
 use cortex_m::asm::bkpt;
-use cortex_m::peripheral::SCB;
 
 #[naked]
 #[no_mangle]

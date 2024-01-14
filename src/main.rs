@@ -9,6 +9,7 @@ naked_functions
 )]
 #![feature(ascii_char)]
 #![feature(panic_info_message)]
+#![feature(asm_const)]
 
 use core::{fmt::Write, panic::PanicInfo};
 use core::ptr::null;
@@ -29,6 +30,7 @@ use crate::task::{create_task, schedule_next_task, start_scheduler};
 mod dispatcher;
 mod task;
 mod global_peripherals;
+mod syscalls;
 
 
 #[panic_handler]
@@ -150,5 +152,6 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() {
-    todo!("app")
+    let r = syscalls::stub::increment(10).unwrap();
+    loop {}
 }
