@@ -14,17 +14,9 @@ naked_functions
 
 use core::{fmt::Write, panic::PanicInfo};
 use cortex_m::peripheral::scb::{SystemHandler};
-
-
 use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{pac::{self}, prelude::*, serial::{Config}};
-
-
-
-
-
 use task::{OS_CURRENT_TASK};
-
 use crate::task::{schedule_next_task, start_scheduler};
 
 mod dispatcher;
@@ -54,41 +46,12 @@ fn panic_handler(info: &PanicInfo) -> ! {
     loop {}
 }
 
-fn task_finished() {
-    loop {
-        // let uart = unsafe { UART.as_mut() }.unwrap();
-        // writeln!(uart, "Task finished!").unwrap();
-        // delay(100000);
-    }
-}
-
 #[exception]
 fn SysTick() {
     let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
     writeln!(serial2, "Tick!").unwrap();
     schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
-}
-
-fn delay(mut time: u32) {
-    while time > 0 {
-        time -= 1;
-    }
-}
-
-
-fn task_handler(params: *const ()) -> *const () {
-    let id = params as i32;
-    loop {
-        cortex_m::interrupt::free(|_| {
-            let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
-            writeln!(uart, "Hello from task {:?} with id {}\r", unsafe { OS_CURRENT_TASK }, id).unwrap();
-            let led = unsafe { global_peripherals::LED.as_mut() }.unwrap();
-            led.toggle();
-        });
-
-        delay(params as u32);
-    }
 }
 
 #[entry]
