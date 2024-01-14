@@ -124,11 +124,11 @@ pub(crate) fn schedule_next_task() {
     unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
     unsafe { OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to get next task") };
 
-    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    let _serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
     // writeln!(serial2, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
 }
 
-pub(crate) fn create_task(handler: fn() -> (), params: *const (), stack: &mut [u32]) {
+pub(crate) fn create_task(handler: fn() -> (), _params: *const (), stack: &mut [u32]) {
     // Stacks grow down, so we take the pointer just past the end
     let mut top = stack.as_mut_ptr_range().end;
 

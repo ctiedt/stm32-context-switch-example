@@ -1,4 +1,4 @@
-use cortex_m_rt::{exception, ExceptionFrame, interrupt};
+use cortex_m_rt::{exception, ExceptionFrame};
 use crate::task::{OS_CURRENT_TASK, OS_NEXT_TASK};
 use crate::global_peripherals::UART;
 use core::fmt::Write;

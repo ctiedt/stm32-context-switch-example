@@ -13,7 +13,7 @@
 //! The challenge here lies in determining proper calling convention for [SVCall] to [handle_syscall]
 //! for arguments and return values.
 
-use cortex_m_rt::exception;
+
 
 
 /// Internal representation of system calls.
@@ -34,7 +34,7 @@ impl TryFrom<u32> for Error {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             x if x == Self::Unknown as u32 => Ok(Self::Unknown),
-            other => Err(())
+            _other => Err(())
         }
     }
 }

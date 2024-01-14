@@ -13,19 +13,19 @@ naked_functions
 #![feature(never_type)]
 
 use core::{fmt::Write, panic::PanicInfo};
-use cortex_m::peripheral::scb::{Exception, SystemHandler};
-use cortex_m::peripheral::syst::SystClkSource;
-use cortex_m::register::control::Npriv;
+use cortex_m::peripheral::scb::{SystemHandler};
+
+
 use cortex_m_rt::{entry, exception};
-use stm32f4xx_hal::{gpio::{gpioa, Output, PushPull}, pac::{self, USART2}, prelude::*, serial::{Config, Serial, Tx}};
-use stm32f4xx_hal::gpio::gpioa::Parts;
-use stm32f4xx_hal::pac::Interrupt;
-use stm32f4xx_hal::rcc::Clocks;
-use stm32f4xx_hal::serial::config::Parity;
-use stm32f4xx_hal::serial::{Rx, Serial2};
-use task::{OS_CURRENT_TASK, OS_NEXT_TASK, Task, TASK_TABLE};
-use crate::global_peripherals::UART;
-use crate::task::{create_task, schedule_next_task, start_scheduler};
+use stm32f4xx_hal::{pac::{self}, prelude::*, serial::{Config}};
+
+
+
+
+
+use task::{OS_CURRENT_TASK};
+
+use crate::task::{schedule_next_task, start_scheduler};
 
 mod dispatcher;
 mod task;
@@ -108,11 +108,11 @@ fn main() -> ! {
     let usart2 = dp.USART2;
     let config = Config::default().baudrate(9600.bps());
     let pins = (tx2_pin, rx2_pin);
-    let mut serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
+    let serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
     unsafe { global_peripherals::UART = Some(serial2); }
 
-    let mut led_pin = gpioa.pa5.into_push_pull_output();
+    let led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
     let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
