@@ -19,16 +19,20 @@ pub mod stubs;
 
 /// Possible error during syscall.
 #[derive(Debug)]
-pub enum Error {
-    Unknown = 1,
+pub enum ReturnCode {
+    /// Operation succeeded.
+    Ok = 0,
+    /// Number ten was passed to Increment.
+    IncrementPastTen,
 }
 
-impl TryFrom<u32> for Error {
+impl TryFrom<u32> for ReturnCode {
     type Error = ();
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            x if x == Self::Unknown as u32 => Ok(Self::Unknown),
+            x if x == Self::Ok as u32 => Ok(Self::Ok),
+            x if x == Self::IncrementPastTen as u32 => Ok(Self::IncrementPastTen),
             _other => Err(())
         }
     }

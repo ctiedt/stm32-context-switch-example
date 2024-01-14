@@ -120,6 +120,9 @@ fn app() -> ! {
     let mut i = 0;
     loop {
         writeln!(serial2, "i={}", i).unwrap();
-        i = syscalls::stubs::increment(i).unwrap();
+        match syscalls::stubs::increment(i) {
+            Ok(next) => i = next,
+            Err(code) => writeln!(serial2, "fail: {:?}", code).unwrap()
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! Kernel-side code for system calls.
 //! Deals with reading call number and arguments from stack and executing the actual calls.
 
-use super::Error;
+use super::ReturnCode;
 
 #[naked]
 #[no_mangle]
@@ -90,9 +90,13 @@ unsafe fn get_syscall_arguments(stack_pointer: *const u32) -> &'static mut [u32]
     core::slice::from_raw_parts_mut(pointer, count)
 }
 
-unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), Error> {
-    args[0] += 1;
-    Ok(())
+unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), ReturnCode> {
+    if args[0] < 10 {
+        args[0] += 1;
+        Ok(())
+    } else {
+        Err(ReturnCode::IncrementPastTen)
+    }
 }
 
 /// Internal representation of system calls.
