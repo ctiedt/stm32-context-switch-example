@@ -57,10 +57,11 @@ unsafe fn panic_handler(info: &PanicInfo) -> ! {
 
 #[exception]
 fn SysTick() {
-    // let mut serial2 = bios::output();
-    // writeln!(serial2, "Tick!").unwrap();
-    // schedule_next_task();
-    // cortex_m::peripheral::SCB::set_pendsv();
+    let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
+    led.toggle();
+
+    schedule_next_task();
+    cortex_m::peripheral::SCB::set_pendsv();
 }
 
 #[entry]
@@ -104,6 +105,13 @@ fn main() -> ! {
     }
     writeln!(raw_serial, "Exception priorities configured!").unwrap();
 
+    write!(raw_serial, "Starting SysTick Timer...").unwrap();
+    let mut systick = cp.SYST.counter_hz(&clocks);
+    systick.listen(SysEvent::Update);
+    systick.start(1.Hz()).unwrap();
+    writeln!(raw_serial, "Done!").unwrap();
+
+
     writeln!(raw_serial, "Initializing BIOS...");
     bios::initialize(raw_serial);
 
@@ -122,17 +130,9 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() -> ! {
-    // bios::flush();
-    let mut serial2 = bios::output();
-    writeln!(serial2, "Hello from App!").unwrap();
+    let mut output = bios::output();
     loop {
-        let mut buf = [0u8; 10];
-        match syscalls::stubs::read(&mut buf) {
-            Ok(n) => writeln!(serial2, "read {} bytes", n).unwrap(),
-            Err(code) => writeln!(serial2, "read: {:?}", code).unwrap(),
-        }
-        writeln!(serial2, "{:?}", buf).unwrap();
-        // Delay 1 second to allow buffer to clear.
-        delay(8_000_000)
+        writeln!(output, "Application Loop!");
+        delay(8_000_0);
     }
 }

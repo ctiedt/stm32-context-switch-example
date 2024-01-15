@@ -32,14 +32,7 @@ impl Write for BlockingOutput {
         let fifo = unsafe { &mut BUFFER };
         // Send every byte.
         for byte in buffer {
-            // Attempt until byte has been sent.
-            while !cortex_m::interrupt::free(|_| unsafe {
-                let ok = BUFFER.push_back(*byte);
-                if !ok {
-                    cortex_m::asm::delay(8000);
-                }
-                ok
-            }) {}
+            while !fifo.push_back(*byte) {}
         }
         Ok(())
     }
