@@ -117,12 +117,12 @@ static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 fn app() -> ! {
     let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
     writeln!(serial2, "Hello from App!").unwrap();
-    let mut i = 0;
     loop {
-        writeln!(serial2, "i={}", i).unwrap();
-        match syscalls::stubs::increment(i) {
-            Ok(next) => i = next,
-            Err(code) => writeln!(serial2, "fail: {:?}", code).unwrap()
+        let mut buf = [0u8; 10];
+        match syscalls::stubs::read(&mut buf) {
+            Ok(n) => writeln!(serial2, "read {} bytes", n).unwrap(),
+            Err(code) => writeln!(serial2, "read: {:?}", code).unwrap(),
         }
+        writeln!(serial2, "{:?}", buf).unwrap();
     }
 }

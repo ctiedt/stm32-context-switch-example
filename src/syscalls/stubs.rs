@@ -15,7 +15,7 @@ macro_rules! build_args {
 macro_rules! exec_syscall {
     ($number:expr , $count:expr $( , $arg:expr )*) => {
         {
-            let mut args : [u32; $count + 1] = [0u32 $( , $arg )*];
+            let mut args : [u32; $count + 1] = [0u32 $( , $arg as u32 )*];
             let count = args.len() as u32;
             let pointer = args.as_mut_ptr() as u32;
             unsafe {
@@ -48,4 +48,12 @@ macro_rules! exec_syscall {
 /// Increment `value` by one and return it.
 pub fn increment(value: u32) -> Result<u32, ReturnCode> {
     exec_syscall!(SyscallNumber::Increment, 1, value).map(|args| args[0])
+}
+
+/// Read from USART2 into `buffer`.
+/// Returns number of bytes read (at most `buffer.len()`) or error.
+pub fn read(buffer: &mut [u8]) -> Result<usize, ReturnCode> {
+    exec_syscall!(SyscallNumber::Read, 2, buffer.len(), buffer.as_mut_ptr())
+        // read returns number of bytes in first argument.
+        .map(|args| args[0] as usize)
 }

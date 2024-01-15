@@ -58,9 +58,8 @@ pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
     // Execute corresponding syscall handler.
     // Data return values from handlers are returned using args.
     let call_result = match number {
-        SyscallNumber::Increment => {
-            handle_syscall_increment(args)
-        }
+        SyscallNumber::Increment => handle_syscall_increment(args),
+        _ => Err(ReturnCode::NotImplemented)
     };
 
     match call_result {
@@ -103,12 +102,14 @@ unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), ReturnCode> {
 #[derive(Debug)]
 pub(super) enum SyscallNumber {
     Increment,
+    Read,
 }
 
 impl SyscallNumber {
     pub fn from(imm: u8) -> Option<Self> {
         match imm {
             x if x == Self::Increment as u8 => Some(Self::Increment),
+            x if x == Self::Read as u8 => Some(Self::Read),
             _ => None
         }
     }

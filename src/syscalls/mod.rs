@@ -22,6 +22,8 @@ pub mod stubs;
 pub enum ReturnCode {
     /// Operation succeeded.
     Ok = 0,
+    /// Call has not yet been implemented.
+    NotImplemented,
     /// Number ten was passed to Increment.
     IncrementPastTen,
 }
@@ -32,6 +34,7 @@ impl TryFrom<u32> for ReturnCode {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             x if x == Self::Ok as u32 => Ok(Self::Ok),
+            x if x == Self::NotImplemented as u32 => Ok(Self::NotImplemented),
             x if x == Self::IncrementPastTen as u32 => Ok(Self::IncrementPastTen),
             _other => Err(())
         }
