@@ -10,7 +10,7 @@ use stm32f4xx_hal::interrupt;
 use stm32f4xx_hal::prelude::_embedded_hal_serial_Write;
 
 static mut SERIAL: Option<Serial<USART2>> = None;
-static mut BUFFER: RingBuffer<16> = RingBuffer::new();
+static mut BUFFER: RingBuffer<1280> = RingBuffer::new();
 
 pub fn initialize(mut serial: Serial<USART2>) {
     unsafe {
@@ -33,14 +33,13 @@ impl Write for BlockingOutput {
         // Send every byte.
         for byte in buffer {
             // Attempt until byte has been sent.
-            while true {
-                // Require atomic access to buffer for modification.
-                if cortex_m::interrupt::free(|_ct| {
-                    fifo.push_back(*byte)
-                }) {
-                    break;
+            while !cortex_m::interrupt::free(|_| unsafe {
+                let ok = BUFFER.push_back(*byte);
+                if !ok {
+                    cortex_m::asm::delay(8000);
                 }
-            }
+                ok
+            }) {}
         }
         Ok(())
     }
@@ -50,24 +49,20 @@ pub unsafe fn get_raw() -> Option<&'static mut Serial<USART2>> {
     SERIAL.as_mut()
 }
 
-pub fn write(buffer: &[u8]) {
-    let fifo = unsafe { &mut BUFFER };
-    let mut count = 0;
-    while count < buffer.len() {
-        // Send single character.
-        while !fifo.push_back(buffer[count]) {}
-        count += 1;
-    }
-}
-
 
 #[interrupt]
 fn USART2() {
-    let serial = unsafe { get_raw().unwrap() };
-    if serial.is_tx_empty() {
-        // Send next byte from buffer, if possible.
-        if let Some(byte) = unsafe { BUFFER.pop_front() } {
-            serial.write(byte).unwrap()
-        }
+    unsafe { send_next_byte() }
+}
+
+/// Helper function to send a single byte of data, if possible.
+unsafe fn send_next_byte() {
+    let serial = get_raw().unwrap();
+    let fifo = &mut BUFFER;
+    if !serial.is_tx_empty() {
+        return;
+    }
+    if let Some(byte) = fifo.pop_front() {
+        serial.write(byte).unwrap();
     }
 }

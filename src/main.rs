@@ -16,9 +16,11 @@ naked_functions
 
 
 use core::{fmt::Write, panic::PanicInfo};
+use cortex_m::asm::delay;
 use cortex_m::peripheral::scb::{SystemHandler};
 use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{pac::{self}, prelude::*, serial::{Config}};
+use stm32f4xx_hal::timer::SysEvent;
 use task::{OS_CURRENT_TASK};
 use crate::task::{schedule_next_task, start_scheduler};
 
@@ -55,10 +57,10 @@ unsafe fn panic_handler(info: &PanicInfo) -> ! {
 
 #[exception]
 fn SysTick() {
-    let mut serial2 = bios::output();
-    writeln!(serial2, "Tick!").unwrap();
-    schedule_next_task();
-    cortex_m::peripheral::SCB::set_pendsv();
+    // let mut serial2 = bios::output();
+    // writeln!(serial2, "Tick!").unwrap();
+    // schedule_next_task();
+    // cortex_m::peripheral::SCB::set_pendsv();
 }
 
 #[entry]
@@ -78,18 +80,8 @@ fn main() -> ! {
     let usart2 = dp.USART2;
     let config = Config::default().baudrate(9600.bps());
     let pins = (tx2_pin, rx2_pin);
-    let mut serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
+    let mut raw_serial = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
-    writeln!(serial2, "Initializing BIOS...");
-    bios::initialize(serial2);
-
-    let led_pin = gpioa.pa5.into_push_pull_output();
-    unsafe { global_peripherals::LED = Some(led_pin); }
-
-    let mut serial2 = bios::output();
-    writeln!(serial2, "Hello, world!").unwrap();
-    writeln!(serial2, "Core clock is at {} Hz", clocks.hclk()).unwrap();
-    writeln!(serial2, "Clocks: {:?}", clocks).unwrap();
 
     // todo!("Setup kernel space memory protection");
     // todo!("Setup interrupt priorities");
@@ -110,9 +102,16 @@ fn main() -> ! {
         /// not change during handling of a system call.
         scb.set_priority(SystemHandler::SVCall, 13);
     }
-    writeln!(serial2, "Exception priorities configured!").unwrap();
+    writeln!(raw_serial, "Exception priorities configured!").unwrap();
 
-    writeln!(serial2, "Starting scheduler...").unwrap();
+    writeln!(raw_serial, "Initializing BIOS...");
+    bios::initialize(raw_serial);
+
+    let led_pin = gpioa.pa5.into_push_pull_output();
+    unsafe { global_peripherals::LED = Some(led_pin); }
+
+    let mut output = bios::output();
+    writeln!(output, "Starting scheduler...").unwrap();
     unsafe { start_scheduler(&mut APPLICATION_STACK, app) }
 }
 
@@ -123,6 +122,7 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() -> ! {
+    // bios::flush();
     let mut serial2 = bios::output();
     writeln!(serial2, "Hello from App!").unwrap();
     loop {
@@ -132,5 +132,7 @@ fn app() -> ! {
             Err(code) => writeln!(serial2, "read: {:?}", code).unwrap(),
         }
         writeln!(serial2, "{:?}", buf).unwrap();
+        // Delay 1 second to allow buffer to clear.
+        delay(8_000_000)
     }
 }
