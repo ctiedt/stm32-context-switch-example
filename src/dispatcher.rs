@@ -1,8 +1,8 @@
 use cortex_m_rt::{exception, ExceptionFrame};
 use crate::task::{OS_CURRENT_TASK, OS_NEXT_TASK};
-use crate::global_peripherals::UART;
 use core::fmt::Write;
 use cortex_m::asm::bkpt;
+use crate::bios;
 
 #[naked]
 #[no_mangle]
@@ -49,8 +49,8 @@ unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
     let bus_fault = ((cfsr >> 8) & 0xff) as u8;
     let memory_fault = cfsr as u8;
 
-    let usart = UART.as_mut().unwrap();
 
+    let mut usart = bios::get_raw().unwrap();
     writeln!(usart, "Hard Fault {:?}", frame).unwrap();
     writeln!(usart, "UFSR={:#016b}", usage_fault).unwrap();
     writeln!(usart, "BFSR={:#08b}", bus_fault).unwrap();

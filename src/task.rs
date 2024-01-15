@@ -1,8 +1,9 @@
 use core::ptr::{null_mut};
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
-use crate::global_peripherals;
+use crate::{bios, global_peripherals};
 use cortex_m::register::control::{Fpca, Npriv, Spsel};
+use core::fmt::Write;
 
 pub(crate) const MAX_TASKS: usize = 8;
 
@@ -124,8 +125,8 @@ pub(crate) fn schedule_next_task() {
     unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
     unsafe { OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to get next task") };
 
-    let _serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
-    // writeln!(serial2, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
+    let mut serial2 = bios::output();
+    writeln!(serial2, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
 }
 
 pub(crate) fn create_task(handler: fn() -> (), _params: *const (), stack: &mut [u32]) {

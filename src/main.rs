@@ -11,6 +11,9 @@ naked_functions
 #![feature(panic_info_message)]
 #![feature(asm_const)]
 #![feature(never_type)]
+// RingBuffer::default()
+#![feature(const_trait_impl)]
+
 
 use core::{fmt::Write, panic::PanicInfo};
 use cortex_m::peripheral::scb::{SystemHandler};
@@ -23,12 +26,14 @@ mod dispatcher;
 mod task;
 mod global_peripherals;
 mod syscalls;
+mod bios;
+mod ring_buffer;
 
 
 #[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
+unsafe fn panic_handler(info: &PanicInfo) -> ! {
     cortex_m::interrupt::disable();
-    let uart = unsafe { global_peripherals::UART.as_mut() }.unwrap();
+    let mut uart = bios::get_raw().unwrap();
     if let Some(location) = info.location() {
         writeln!(
             uart,
@@ -43,12 +48,14 @@ fn panic_handler(info: &PanicInfo) -> ! {
     if let Some(s) = info.payload().downcast_ref::<&str>() {
         writeln!(uart, "{}\r", s).unwrap();
     }
-    loop {}
+    loop {
+        cortex_m::asm::bkpt()
+    }
 }
 
 #[exception]
 fn SysTick() {
-    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    let mut serial2 = bios::output();
     writeln!(serial2, "Tick!").unwrap();
     schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
@@ -71,14 +78,15 @@ fn main() -> ! {
     let usart2 = dp.USART2;
     let config = Config::default().baudrate(9600.bps());
     let pins = (tx2_pin, rx2_pin);
-    let serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
+    let mut serial2 = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
-    unsafe { global_peripherals::UART = Some(serial2); }
+    writeln!(serial2, "Initializing BIOS...");
+    bios::initialize(serial2);
 
     let led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
-    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    let mut serial2 = bios::output();
     writeln!(serial2, "Hello, world!").unwrap();
     writeln!(serial2, "Core clock is at {} Hz", clocks.hclk()).unwrap();
     writeln!(serial2, "Clocks: {:?}", clocks).unwrap();
@@ -115,7 +123,7 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() -> ! {
-    let serial2 = unsafe { &mut global_peripherals::SYNC_SERIAL2 };
+    let mut serial2 = bios::output();
     writeln!(serial2, "Hello from App!").unwrap();
     loop {
         let mut buf = [0u8; 10];
