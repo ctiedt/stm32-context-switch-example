@@ -57,9 +57,6 @@ unsafe fn panic_handler(info: &PanicInfo) -> ! {
 
 #[exception]
 fn SysTick() {
-    let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
-    led.toggle();
-
     schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
 }
@@ -133,7 +130,9 @@ static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 fn app() -> ! {
     let mut output = bios::raw_output();
     loop {
-        writeln!(output, "Application Loop!");
-        delay(8_000_0);
+        // writeln!(output, "Application Loop!");
+        let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
+        led.toggle();
+        delay(8_000_000);
     }
 }
