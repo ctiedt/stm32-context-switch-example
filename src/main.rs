@@ -35,10 +35,10 @@ mod fifo;
 #[panic_handler]
 unsafe fn panic_handler(info: &PanicInfo) -> ! {
     cortex_m::interrupt::disable();
-    let mut uart = bios::get_raw().unwrap();
+    let mut raw_output = bios::raw_output();
     if let Some(location) = info.location() {
         writeln!(
-            uart,
+            raw_output,
             "panicked at {} - {}:{} with message '{}'\n",
             location.file(),
             location.line(),
@@ -48,7 +48,7 @@ unsafe fn panic_handler(info: &PanicInfo) -> ! {
             .unwrap();
     }
     if let Some(s) = info.payload().downcast_ref::<&str>() {
-        writeln!(uart, "{}\r", s).unwrap();
+        writeln!(raw_output, "{}\r", s).unwrap();
     }
     loop {
         cortex_m::asm::bkpt()

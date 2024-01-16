@@ -30,8 +30,7 @@ fn PendSV() {
         // 4. Restore r4-r11
         "pop {{r4-r11}}",
 
-        // 5. Return in thread mode
-        "ldr r14, =0xFFFFFFF9",
+        // 5. Return to mode we came from.
         "bx lr",
         sym OS_CURRENT_TASK,
         sym OS_NEXT_TASK,

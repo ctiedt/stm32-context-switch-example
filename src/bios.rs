@@ -39,8 +39,8 @@ impl Write for RawOutput {
     }
 }
 
-pub unsafe fn get_raw() -> Option<&'static mut Serial<USART2>> {
-    SERIAL.as_mut()
+fn get_raw() -> Option<&'static mut Serial<USART2>> {
+    unsafe { SERIAL.as_mut() }
 }
 
 
