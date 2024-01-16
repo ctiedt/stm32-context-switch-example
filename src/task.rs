@@ -125,7 +125,7 @@ pub(crate) fn schedule_next_task() {
     unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
     unsafe { OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to get next task") };
 
-    let mut serial2 = bios::output();
+    let mut serial2 = bios::raw_output();
     writeln!(serial2, "Now running task {:?}\r", unsafe { OS_NEXT_TASK }).unwrap();
 }
 

@@ -83,6 +83,10 @@ fn main() -> ! {
     let pins = (tx2_pin, rx2_pin);
     let mut raw_serial = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
+    writeln!(raw_serial, "Initializing BIOS...").unwrap();
+    bios::initialize(raw_serial);
+    let mut raw_output = bios::raw_output();
+
 
     // todo!("Setup kernel space memory protection");
     // todo!("Setup interrupt priorities");
@@ -103,22 +107,19 @@ fn main() -> ! {
         /// not change during handling of a system call.
         scb.set_priority(SystemHandler::SVCall, 13);
     }
-    writeln!(raw_serial, "Exception priorities configured!").unwrap();
+    writeln!(raw_output, "Exception priorities configured!").unwrap();
 
-    write!(raw_serial, "Starting SysTick Timer...").unwrap();
+    write!(raw_output, "Starting SysTick Timer...").unwrap();
     let mut systick = cp.SYST.counter_hz(&clocks);
     systick.listen(SysEvent::Update);
     systick.start(1.Hz()).unwrap();
-    writeln!(raw_serial, "Done!").unwrap();
+    writeln!(raw_output, "Done!").unwrap();
 
-
-    writeln!(raw_serial, "Initializing BIOS...");
-    bios::initialize(raw_serial);
 
     let led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
-    let mut output = bios::output();
+    let mut output = bios::raw_output();
     writeln!(output, "Starting scheduler...").unwrap();
     unsafe { start_scheduler(&mut APPLICATION_STACK, app) }
 }
@@ -130,7 +131,7 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() -> ! {
-    let mut output = bios::output();
+    let mut output = bios::raw_output();
     loop {
         writeln!(output, "Application Loop!");
         delay(8_000_0);

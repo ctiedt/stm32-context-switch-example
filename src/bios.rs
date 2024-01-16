@@ -20,21 +20,22 @@ pub fn initialize(mut serial: Serial<USART2>) {
     }
 }
 
-pub struct BlockingOutput;
+/// Raw, unbuffered access to output.
+pub struct RawOutput;
 
-pub fn output() -> BlockingOutput {
-    BlockingOutput {}
+pub fn raw_output() -> RawOutput {
+    RawOutput {}
 }
 
-impl Write for BlockingOutput {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let buffer = s.as_bytes();
-        let fifo = unsafe { &mut BUFFER };
-        // Send every byte.
-        for byte in buffer {
-            while !fifo.push_back(*byte) {}
-        }
-        Ok(())
+impl Write for RawOutput {
+    fn write_str(&mut self, buffer: &str) -> core::fmt::Result {
+        // Ignore any buffered output and write out data.
+        // To do this, we disable all interrupts.
+        cortex_m::interrupt::free(|_| unsafe {
+            let serial = get_raw().unwrap();
+            let result = serial.write_str(buffer);
+            result
+        })
     }
 }
 

@@ -50,11 +50,11 @@ unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
     let memory_fault = cfsr as u8;
 
 
-    let mut usart = bios::get_raw().unwrap();
-    writeln!(usart, "Hard Fault {:?}", frame).unwrap();
-    writeln!(usart, "UFSR={:#016b}", usage_fault).unwrap();
-    writeln!(usart, "BFSR={:#08b}", bus_fault).unwrap();
-    writeln!(usart, "MMFSR={:#08b}", memory_fault).unwrap();
+    let mut raw_output = bios::raw_output();
+    writeln!(raw_output, "Hard Fault {:?}", frame).unwrap();
+    writeln!(raw_output, "UFSR={:#016b}", usage_fault).unwrap();
+    writeln!(raw_output, "BFSR={:#08b}", bus_fault).unwrap();
+    writeln!(raw_output, "MMFSR={:#08b}", memory_fault).unwrap();
 
     // Recovery is highly unlikely, so we simply wait for a manual reset and allow debugging.
     loop { bkpt() }
