@@ -5,12 +5,12 @@ use cortex_m::asm::bkpt;
 use cortex_m::peripheral::NVIC;
 use stm32f4xx_hal::pac::{Interrupt, USART2};
 use stm32f4xx_hal::serial::{Event, Listen, Serial, Tx, TxISR};
-use crate::ring_buffer::RingBuffer;
+use crate::fifo::FIFO;
 use stm32f4xx_hal::interrupt;
 use stm32f4xx_hal::prelude::_embedded_hal_serial_Write;
 
 static mut SERIAL: Option<Serial<USART2>> = None;
-static mut BUFFER: RingBuffer<1280> = RingBuffer::new();
+static mut BUFFER: FIFO<u8, 1280> = FIFO::new_with(0u8);
 
 pub fn initialize(mut serial: Serial<USART2>) {
     unsafe {

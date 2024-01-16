@@ -29,7 +29,7 @@ mod task;
 mod global_peripherals;
 mod syscalls;
 mod bios;
-mod ring_buffer;
+mod fifo;
 
 
 #[panic_handler]
