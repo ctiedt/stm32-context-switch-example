@@ -4,19 +4,30 @@ use core::fmt::{Error, Write};
 use cortex_m::asm::bkpt;
 use cortex_m::peripheral::NVIC;
 use stm32f4xx_hal::pac::{Interrupt, USART2};
-use stm32f4xx_hal::serial::{Event, Listen, Serial, Tx, TxISR};
-use crate::fifo::FIFO;
-use stm32f4xx_hal::interrupt;
-use stm32f4xx_hal::prelude::_embedded_hal_serial_Write;
+use stm32f4xx_hal::serial::{CFlag, Flag};
+use stm32f4xx_hal::uart::{TxISR, Event};
+use stm32f4xx_hal::{ClearFlags, interrupt, ReadFlags};
+use stm32f4xx_hal::hal_02::serial::Write as W;
+use stm32f4xx_hal::Listen;
 
-static mut SERIAL: Option<Serial<USART2>> = None;
-static mut BUFFER: FIFO<u8, 1280> = FIFO::new_with(0u8);
+type FIFO = crate::fifo::FIFO<u8, 1280>;
+type Serial = stm32f4xx_hal::serial::Serial<USART2>;
 
-pub fn initialize(mut serial: Serial<USART2>) {
+static mut SERIAL: Option<Serial> = None;
+static mut TX_BUFFER: FIFO = FIFO::new_with(0u8);
+
+pub fn initialize(mut serial: Serial) {
     unsafe {
-        serial.listen(Event::Txe);
+        // Wait for completion of any previous transmissions before enabling interrupt.
+        while !serial.is_tx_empty() {}
+
+        // Clear pending flag to not trigger immediately and enable interrupt.
+        NVIC::unpend(Interrupt::USART2);
+        NVIC::unmask(Interrupt::USART2);
+
+        // Hand over to BIOS and start listening;
         SERIAL = Some(serial);
-        NVIC::unmask(Interrupt::USART2)
+        enable_tx_interrupt();
     }
 }
 
@@ -30,33 +41,95 @@ pub fn raw_output() -> RawOutput {
 impl Write for RawOutput {
     fn write_str(&mut self, buffer: &str) -> core::fmt::Result {
         // Ignore any buffered output and write out data.
-        // To do this, we disable all interrupts.
-        cortex_m::interrupt::free(|_| unsafe {
-            let serial = get_raw().unwrap();
-            let result = serial.write_str(buffer);
+        // To do this, we disable all USART2 interrupts.
+        unsafe {
+            let interrupt_enabled = NVIC::is_enabled(Interrupt::USART2);
+            NVIC::mask(Interrupt::USART2);
+
+            let tx = get_raw_serial();
+            // Wait for most recent transmission to complete.
+            while !tx.is_tx_empty() {}
+            let result = tx.write_str(buffer);
+            // Wait for our transmission to complete.
+            while !tx.is_tx_empty() {}
+
+            // Continue interrupt-driven transmission and re-enable interrupt.
+            send_next(tx);
+            if interrupt_enabled { NVIC::unmask(Interrupt::USART2) }
             result
-        })
+        }
     }
 }
 
-fn get_raw() -> Option<&'static mut Serial<USART2>> {
-    unsafe { SERIAL.as_mut() }
+/// Buffered output with interrupt.
+pub struct BufferedOutput;
+
+pub fn buffered_output() -> BufferedOutput { BufferedOutput }
+
+impl Write for BufferedOutput {
+    fn write_str(&mut self, string: &str) -> core::fmt::Result {
+        unsafe {
+            let tx = get_raw_serial();
+            let fifo = get_raw_tx_buffer();
+
+            // We need to disable our interrupt to safely access the queue.
+            disable_tx_interrupt();
+            // Await last transmission.
+            while !tx.is_tx_empty() {}
+            for character in string.bytes() {
+                if !fifo.push_back(character) {
+                    break;
+                }
+            }
+
+            // Start transmission and re-enable interrupt.
+            send_next(tx);
+            enable_tx_interrupt();
+            Ok(())
+        }
+    }
 }
 
+unsafe fn get_raw_serial() -> &'static mut Serial {
+    SERIAL.as_mut().unwrap()
+}
+
+unsafe fn get_raw_tx_buffer() -> &'static mut FIFO {
+    &mut TX_BUFFER
+}
+
+
+/// Helper function to disable the transmission interrupt before a critical section.
+unsafe fn disable_tx_interrupt() {
+    let serial = get_raw_serial();
+    serial.unlisten(Event::TransmissionComplete);
+}
+
+/// Helper function to enable the transmission interrupt after a critical section.
+unsafe fn enable_tx_interrupt() {
+    let serial = get_raw_serial();
+    serial.listen(Event::TransmissionComplete);
+}
 
 #[interrupt]
-fn USART2() {
-    unsafe { send_next_byte() }
+unsafe fn USART2() {
+    let tx = get_raw_serial();
+    if tx.is_tx_empty() {
+        let fifo = get_raw_tx_buffer();
+        if let Some(byte) = fifo.pop_front() {
+            // Writing new data clears the transmission complete interrupt.
+            tx.write(byte).unwrap();
+        } else {
+            // Clear transmission complete flag to stop interrupt from triggering.
+            tx.clear_flags(CFlag::TransmissionComplete);
+        }
+    }
 }
 
-/// Helper function to send a single byte of data, if possible.
-unsafe fn send_next_byte() {
-    let serial = get_raw().unwrap();
-    let fifo = &mut BUFFER;
-    if !serial.is_tx_empty() {
-        return;
-    }
+/// Helper function to start a transmission or simple write byte.
+fn send_next(tx: &mut Serial) {
+    let fifo = unsafe { get_raw_tx_buffer() };
     if let Some(byte) = fifo.pop_front() {
-        serial.write(byte).unwrap();
+        tx.write(byte).unwrap();
     }
 }

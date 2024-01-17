@@ -48,6 +48,7 @@ impl<T: Copy, const SIZE: usize> FIFO<T, SIZE> {
         }
         self.data[self.write_head] = data;
         self.write_head = (self.write_head + 1) % SIZE;
+        self.is_empty = false;
         true
     }
 

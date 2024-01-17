@@ -82,7 +82,7 @@ fn main() -> ! {
 
     writeln!(raw_serial, "Initializing BIOS...").unwrap();
     bios::initialize(raw_serial);
-    let mut raw_output = bios::raw_output();
+    let mut buffered = bios::buffered_output();
 
 
     // todo!("Setup kernel space memory protection");
@@ -104,13 +104,13 @@ fn main() -> ! {
         /// not change during handling of a system call.
         scb.set_priority(SystemHandler::SVCall, 13);
     }
-    writeln!(raw_output, "Exception priorities configured!").unwrap();
+    writeln!(buffered, "Exception priorities configured!").unwrap();
 
-    write!(raw_output, "Starting SysTick Timer...").unwrap();
-    let mut systick = cp.SYST.counter_hz(&clocks);
-    systick.listen(SysEvent::Update);
-    systick.start(1.Hz()).unwrap();
-    writeln!(raw_output, "Done!").unwrap();
+    // write!(buffered, "Starting SysTick Timer...").unwrap();
+    // let mut systick = cp.SYST.counter_hz(&clocks);
+    // systick.listen(SysEvent::Update);
+    // systick.start(1.Hz()).unwrap();
+    // writeln!(buffered, "Done!").unwrap();
 
 
     let led_pin = gpioa.pa5.into_push_pull_output();
@@ -128,9 +128,9 @@ const APP_STACK_SIZE: usize = 1280usize;
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
 fn app() -> ! {
-    let mut output = bios::raw_output();
+    let mut output = bios::buffered_output();
     loop {
-        // writeln!(output, "Application Loop!");
+        writeln!(output, "Application Loop!").unwrap();
         let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
         led.toggle();
         delay(8_000_000);

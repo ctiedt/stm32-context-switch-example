@@ -118,6 +118,9 @@ fn initialize_scheduler() {
         // Required to have a valid reference during first scheduler run.
         OS_CURRENT_TASK = OS_NEXT_TASK;
     }
+
+    let mut unbuffered = bios::raw_output();
+    writeln!(unbuffered, "Started scheduler!").unwrap();
 }
 
 
