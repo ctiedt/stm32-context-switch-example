@@ -119,8 +119,8 @@ fn initialize_scheduler() {
         OS_CURRENT_TASK = OS_NEXT_TASK;
     }
 
-    let mut unbuffered = bios::raw_output();
-    writeln!(unbuffered, "Started scheduler!").unwrap();
+    let mut output = bios::buffered_output();
+    writeln!(output, "Started scheduler!").unwrap();
 }
 
 
@@ -128,8 +128,8 @@ pub(crate) fn schedule_next_task() {
     unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
     unsafe { OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to get next task") };
 
-    let mut raw_output = bios::raw_output();
-    // writeln!(raw_output, "scheduled task {:?}", unsafe { OS_NEXT_TASK }).unwrap();
+    let mut output = bios::buffered_output();
+    writeln!(output, "scheduled task {:?}", unsafe { OS_NEXT_TASK }).unwrap();
 }
 
 pub(crate) fn create_task(handler: fn() -> (), _params: *const (), stack: &mut [u32]) {

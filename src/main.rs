@@ -34,21 +34,19 @@ mod fifo;
 
 #[panic_handler]
 unsafe fn panic_handler(info: &PanicInfo) -> ! {
-    cortex_m::interrupt::disable();
-    let mut raw_output = bios::raw_output();
+    let mut output = bios::buffered_output();
     if let Some(location) = info.location() {
         writeln!(
-            raw_output,
+            output,
             "panicked at {} - {}:{} with message '{}'\n",
             location.file(),
             location.line(),
             location.column(),
             info.message().unwrap()
-        )
-            .unwrap();
+        );
     }
     if let Some(s) = info.payload().downcast_ref::<&str>() {
-        writeln!(raw_output, "{}\r", s).unwrap();
+        writeln!(output, "{}\r", s).unwrap();
     }
     loop {
         cortex_m::asm::bkpt()
@@ -83,8 +81,9 @@ fn main() -> ! {
     writeln!(raw_serial, "Sysclock at {}, Hclock at {}", clocks.sysclk(), clocks.hclk()).unwrap();
     writeln!(raw_serial, "Initializing BIOS...").unwrap();
     bios::initialize(raw_serial);
-    let mut buffered = bios::buffered_output();
 
+
+    let mut output = bios::buffered_output();
 
     // todo!("Setup kernel space memory protection");
     // todo!("Setup interrupt priorities");
@@ -105,7 +104,7 @@ fn main() -> ! {
         /// not change during handling of a system call.
         scb.set_priority(SystemHandler::SVCall, 13);
     }
-    writeln!(buffered, "Exception priorities configured!").unwrap();
+    writeln!(output, "Exception priorities configured!").unwrap();
 
     // write!(buffered, "Starting SysTick Timer...").unwrap();
     // let mut systick = cp.SYST.counter_hz(&clocks);
@@ -117,7 +116,6 @@ fn main() -> ! {
     let led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
-    let mut output = bios::raw_output();
     writeln!(output, "Starting scheduler...").unwrap();
     unsafe { start_scheduler(&mut APPLICATION_STACK, app) }
 }
@@ -133,10 +131,7 @@ fn app() -> ! {
     loop {
         let message = "Hello from App!\n";
         let buffer = message.as_bytes();
-        match syscalls::stubs::write(buffer) {
-            Ok(number) => {}
-            Err(e) => writeln!(output, "Failed to write: {:?}", e).unwrap(),
-        }
+        syscalls::stubs::write(buffer).expect("write failed");
         let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
         led.toggle();
         delay(8_000_000);

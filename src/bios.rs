@@ -10,7 +10,7 @@ use stm32f4xx_hal::{ClearFlags, interrupt, ReadFlags};
 use stm32f4xx_hal::hal_02::serial::Write as W;
 use stm32f4xx_hal::Listen;
 
-type FIFO = crate::fifo::FIFO<u8, 1280>;
+type FIFO = crate::fifo::FIFO<u8, 128>;
 type Serial = stm32f4xx_hal::serial::Serial<USART2>;
 
 static mut SERIAL: Option<Serial> = None;
@@ -31,35 +31,13 @@ pub fn initialize(mut serial: Serial) {
     }
 }
 
+pub unsafe fn take_serial() -> Option<Serial> {
+    SERIAL.take()
+}
+
 /// Raw, unbuffered access to output.
 pub struct RawOutput;
 
-pub fn raw_output() -> RawOutput {
-    RawOutput {}
-}
-
-impl Write for RawOutput {
-    fn write_str(&mut self, buffer: &str) -> core::fmt::Result {
-        // Ignore any buffered output and write out data.
-        // To do this, we disable all USART2 interrupts.
-        unsafe {
-            let interrupt_enabled = NVIC::is_enabled(Interrupt::USART2);
-            NVIC::mask(Interrupt::USART2);
-
-            let tx = get_raw_serial();
-            // Wait for most recent transmission to complete.
-            while !tx.is_tx_empty() {}
-            let result = tx.write_str(buffer);
-            // Wait for our transmission to complete.
-            while !tx.is_tx_empty() {}
-
-            // Continue interrupt-driven transmission and re-enable interrupt.
-            send_next(tx);
-            if interrupt_enabled { NVIC::unmask(Interrupt::USART2) }
-            result
-        }
-    }
-}
 
 /// Buffered output with interrupt.
 pub struct BufferedOutput;
