@@ -102,14 +102,14 @@ unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), ReturnCode> {
 #[derive(Debug)]
 pub(super) enum SyscallNumber {
     Increment,
-    Read,
+    Write,
 }
 
 impl SyscallNumber {
     pub fn from(imm: u8) -> Option<Self> {
         match imm {
             x if x == Self::Increment as u8 => Some(Self::Increment),
-            x if x == Self::Read as u8 => Some(Self::Read),
+            x if x == Self::Write as u8 => Some(Self::Write),
             _ => None
         }
     }

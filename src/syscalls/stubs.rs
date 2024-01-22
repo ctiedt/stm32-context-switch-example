@@ -3,6 +3,7 @@
 //! Also returning errors in a nice format.
 //! Any validation here needs to be repeated in kernel for security.
 
+use super::SyscallError;
 use super::ReturnCode;
 use super::kernel_mode::SyscallNumber;
 
@@ -39,21 +40,21 @@ macro_rules! exec_syscall {
             if code == ReturnCode::Ok as u32 {
                 Ok(ret_args)
             } else {
-                Err(ReturnCode::try_from(code).expect("system call returned an unknown return code"))
+                Err(super::decode_error(code, &args))
             }
         }
     };
 }
 
 /// Increment `value` by one and return it.
-pub fn increment(value: u32) -> Result<u32, ReturnCode> {
+pub fn increment(value: u32) -> Result<u32, SyscallError> {
     exec_syscall!(SyscallNumber::Increment, 1, value).map(|args| args[0])
 }
 
 /// Read from USART2 into `buffer`.
 /// Returns number of bytes read (at most `buffer.len()`) or error.
-pub fn read(buffer: &mut [u8]) -> Result<usize, ReturnCode> {
-    exec_syscall!(SyscallNumber::Read, 2, buffer.len(), buffer.as_mut_ptr())
+pub fn write(buffer: &[u8]) -> Result<usize, SyscallError> {
+    exec_syscall!(SyscallNumber::Write, 2, buffer.len(), buffer.as_ptr())
         // read returns number of bytes in first argument.
         .map(|args| args[0] as usize)
 }

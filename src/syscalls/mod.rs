@@ -13,12 +13,13 @@
 //! The challenge here lies in determining proper calling convention for [kernel_mode::SVCall] to [kernel_mode::handle_syscall]
 //! for arguments and return values.
 
-
 mod kernel_mode;
 pub mod stubs;
 
-/// Possible error during syscall.
+/// Returned from system call.
+/// Users should not use this directly but instead handle [Result<_, SyscallError>] where possible.
 #[derive(Debug)]
+#[repr(u32)]
 pub enum ReturnCode {
     /// Operation succeeded.
     Ok = 0,
@@ -26,17 +27,28 @@ pub enum ReturnCode {
     NotImplemented,
     /// Number ten was passed to Increment.
     IncrementPastTen,
+    /// Insufficient space while writing.
+    InsufficientSpace,
 }
 
-impl TryFrom<u32> for ReturnCode {
-    type Error = ();
+#[derive(Debug)]
+pub enum SyscallError {
+    /// An unknown error code was encountered. Contains the invalid return code.
+    Unknown(u32),
+    /// Call has not yet been implemented.
+    NotImplemented,
+    /// Number ten was passed to Increment.
+    IncrementPastTen,
+    /// Insufficient space while writing. Contains number of elements successfully written.
+    InsufficientSpace(usize),
+}
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            x if x == Self::Ok as u32 => Ok(Self::Ok),
-            x if x == Self::NotImplemented as u32 => Ok(Self::NotImplemented),
-            x if x == Self::IncrementPastTen as u32 => Ok(Self::IncrementPastTen),
-            _other => Err(())
-        }
+/// Helper function to decode errors from an argument array.
+fn decode_error(code: u32, args: &[u32]) -> SyscallError {
+    match code {
+        x if x == ReturnCode::NotImplemented as u32 => SyscallError::NotImplemented,
+        x if x == ReturnCode::IncrementPastTen as u32 => SyscallError::IncrementPastTen,
+        x if x == ReturnCode::InsufficientSpace as u32 => SyscallError::InsufficientSpace(args[0] as usize),
+        other => SyscallError::Unknown(other),
     }
 }

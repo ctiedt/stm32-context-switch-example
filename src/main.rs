@@ -130,7 +130,12 @@ static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 fn app() -> ! {
     let mut output = bios::buffered_output();
     loop {
-        writeln!(output, "Application Loop!").unwrap();
+        let message = "Hello from App!\n";
+        let buffer = message.as_bytes();
+        match syscalls::stubs::write(buffer) {
+            Ok(number) => {}
+            Err(e) => writeln!(output, "Failed to write: {:?}", e).unwrap(),
+        }
         let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
         led.toggle();
         delay(8_000_000);
