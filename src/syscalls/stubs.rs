@@ -40,7 +40,7 @@ macro_rules! exec_syscall {
             if code == ReturnCode::Ok as u32 {
                 Ok(ret_args)
             } else {
-                Err(super::decode_error(code, &args))
+                Err(super::decode_error(code, &ret_args))
             }
         }
     };

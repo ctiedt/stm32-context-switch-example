@@ -126,14 +126,24 @@ const APP_STACK_SIZE: usize = 1280usize;
 /// Application stack used after switch to scheduler.
 static mut APPLICATION_STACK: [u32; APP_STACK_SIZE] = [0u32; APP_STACK_SIZE];
 
+fn send_blocking(message: &str) -> Result<(), syscalls::SyscallError> {
+    let buffer = message.as_bytes();
+    let mut count = 0;
+    while count < buffer.len() {
+        let to_send = &buffer[count..];
+        match syscalls::stubs::write(to_send) {
+            Ok(c) => count += c,
+            Err(syscalls::SyscallError::InsufficientSpace(c)) => count += c,
+            Err(other) => { return Err(other); }
+        }
+    };
+    Ok(())
+}
+
 fn app() -> ! {
-    let mut output = bios::buffered_output();
+    let very_long_message = include_str!("main.rs");
     loop {
-        let message = "Hello from App!\n";
-        let buffer = message.as_bytes();
-        syscalls::stubs::write(buffer).expect("write failed");
-        let led = unsafe { &mut global_peripherals::LED.as_mut().unwrap() };
-        led.toggle();
+        send_blocking(very_long_message).expect("sending failed");
         delay(8_000_000);
     }
 }
