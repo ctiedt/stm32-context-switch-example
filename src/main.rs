@@ -80,6 +80,7 @@ fn main() -> ! {
     let pins = (tx2_pin, rx2_pin);
     let mut raw_serial = usart2.serial::<u8>(pins, config, &clocks).unwrap();
 
+    writeln!(raw_serial, "Sysclock at {}, Hclock at {}", clocks.sysclk(), clocks.hclk()).unwrap();
     writeln!(raw_serial, "Initializing BIOS...").unwrap();
     bios::initialize(raw_serial);
     let mut buffered = bios::buffered_output();

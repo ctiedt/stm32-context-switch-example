@@ -7,7 +7,7 @@ pub struct FIFO<T: Copy, const SIZE: usize> {
     /// End of data.
     write_head: usize,
     /// When `begin == end`, buffer is either empty or completely full.
-    is_empty: bool,
+    count: usize,
 }
 
 
@@ -17,28 +17,27 @@ impl<T: Copy, const SIZE: usize> FIFO<T, SIZE> {
             data: [default; SIZE],
             read_head: 0,
             write_head: 0,
-            is_empty: true,
+            count: 0,
         }
     }
 
     /// Number of available elements to read.
     pub fn len(&self) -> usize {
-        if self.is_empty {
-            0
-        } else if self.read_head < self.write_head {
-            self.write_head - self.read_head
-        } else {
-            SIZE + self.write_head - self.read_head
-        }
+        self.count
+    }
+
+    /// Number of free slots.
+    pub fn free_space(&self) -> usize {
+        SIZE - self.len()
     }
 
     /// Whether buffer is empty.
     pub fn is_empty(&self) -> bool {
-        self.is_empty
+        self.count == 0
     }
 
     /// Whether buffer is full.
-    pub fn is_full(&self) -> bool { self.len() == SIZE }
+    pub fn is_full(&self) -> bool { self.count == SIZE }
 
     /// Append data to end of buffer.
     /// Returns `true` if successful.
@@ -48,8 +47,22 @@ impl<T: Copy, const SIZE: usize> FIFO<T, SIZE> {
         }
         self.data[self.write_head] = data;
         self.write_head = (self.write_head + 1) % SIZE;
-        self.is_empty = false;
+        self.count += 1;
         true
+    }
+
+    /// Tries to append an entire array of elements.
+    /// Returns [`Ok(len(data)`] if all elements were copied to the buffer and [`Err(count)`] where
+    /// `count` is the number of appended elements when there was not enough space.
+    pub fn append(&mut self, data: &[T]) -> Result<usize, usize> {
+        let mut appended = 0;
+        for element in data {
+            if !self.push_back(*element) {
+                return Err(appended);
+            }
+            appended += 1;
+        }
+        Ok(appended)
     }
 
     /// Pop data from start of buffer.
@@ -60,7 +73,7 @@ impl<T: Copy, const SIZE: usize> FIFO<T, SIZE> {
 
         let data = self.data[self.read_head];
         self.read_head = (self.read_head + 1) % SIZE;
-        self.is_empty = self.read_head == self.write_head;
+        self.count -= 1;
         Some(data)
     }
 }

@@ -1,6 +1,8 @@
 //! Kernel-side code for system calls.
 //! Deals with reading call number and arguments from stack and executing the actual calls.
 
+use crate::bios;
+use crate::syscalls::SyscallError;
 use super::ReturnCode;
 
 #[naked]
@@ -59,6 +61,7 @@ pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
     // Data return values from handlers are returned using args.
     let call_result = match number {
         SyscallNumber::Increment => handle_syscall_increment(args),
+        SyscallNumber::Write => handle_syscall_write(args),
         _ => Err(ReturnCode::NotImplemented)
     };
 
@@ -98,6 +101,23 @@ unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), ReturnCode> {
     }
 }
 
+unsafe fn handle_syscall_write(args: &mut [u32]) -> Result<(), ReturnCode> {
+    let len = args[0] as usize;
+    let ptr = args[1] as *const u8;
+    let buffer = core::slice::from_raw_parts(ptr, len);
+    let mut output = bios::buffered_output();
+    match output.append(buffer) {
+        Ok(count) => {
+            args[0] = count as u32;
+            Ok(())
+        }
+        Err(appended) => {
+            args[0] = appended as u32;
+            Err(ReturnCode::InsufficientSpace)
+        }
+    }
+}
+
 /// Internal representation of system calls.
 #[derive(Debug)]
 pub(super) enum SyscallNumber {
@@ -110,7 +130,7 @@ impl SyscallNumber {
         match imm {
             x if x == Self::Increment as u8 => Some(Self::Increment),
             x if x == Self::Write as u8 => Some(Self::Write),
-            _ => None
+            other => None,
         }
     }
 }
