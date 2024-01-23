@@ -11,19 +11,21 @@ naked_functions
 #![feature(panic_info_message)]
 #![feature(asm_const)]
 #![feature(never_type)]
-// RingBuffer::default()
 #![feature(const_trait_impl)]
 
 
+extern crate alloc;
+
+use embedded_alloc::Heap;
+
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
 use core::{fmt::Write, panic::PanicInfo};
 use cortex_m::asm::delay;
-use cortex_m::peripheral::scb::{SystemHandler};
+use cortex_m::peripheral::scb::SystemHandler;
 use cortex_m_rt::{entry, exception};
-use stm32f4xx_hal::{pac::{self}, prelude::*, serial::{Config}};
-use stm32f4xx_hal::timer::SysEvent;
-use task::{OS_CURRENT_TASK};
-use crate::syscalls::SyscallError;
-use crate::task::{schedule_next_task, start_scheduler};
+use stm32f4xx_hal::{pac::{self}, prelude::*, serial::Config};
 
 mod dispatcher;
 mod task;
@@ -31,10 +33,11 @@ mod global_peripherals;
 mod syscalls;
 mod bios;
 mod fifo;
-
+mod scheduler;
 
 #[panic_handler]
 unsafe fn panic_handler(info: &PanicInfo) -> ! {
+    cortex_m::interrupt::disable();
     let mut output = bios::buffered_output();
     if let Some(location) = info.location() {
         writeln!(
@@ -49,19 +52,23 @@ unsafe fn panic_handler(info: &PanicInfo) -> ! {
     if let Some(s) = info.payload().downcast_ref::<&str>() {
         writeln!(output, "{}\r", s).unwrap();
     }
-    loop {
-        cortex_m::asm::bkpt()
-    }
+    loop {}
 }
 
 #[exception]
 fn SysTick() {
-    schedule_next_task();
     cortex_m::peripheral::SCB::set_pendsv();
 }
 
 #[entry]
 fn main() -> ! {
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024 * 16;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
+
     let cp = pac::CorePeripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
@@ -107,18 +114,12 @@ fn main() -> ! {
     }
     writeln!(output, "Exception priorities configured!").unwrap();
 
-    // write!(buffered, "Starting SysTick Timer...").unwrap();
-    // let mut systick = cp.SYST.counter_hz(&clocks);
-    // systick.listen(SysEvent::Update);
-    // systick.start(1.Hz()).unwrap();
-    // writeln!(buffered, "Done!").unwrap();
-
 
     let led_pin = gpioa.pa5.into_push_pull_output();
     unsafe { global_peripherals::LED = Some(led_pin); }
 
     writeln!(output, "Starting scheduler...").unwrap();
-    unsafe { start_scheduler(&mut APPLICATION_STACK, app) }
+    unsafe { scheduler::start(&clocks, cp.SYST, &mut APPLICATION_STACK, app) };
 }
 
 
@@ -159,7 +160,7 @@ impl Write for BlockingWriter {
     }
 }
 
-fn app() -> ! {
+fn app() {
     let mut writer = BlockingWriter;
     let very_long_message = &include_str!("main.rs")[0..512];
     let mut value = 0u32;

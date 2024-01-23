@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.3"
+embedded-alloc = "0.5.1"
 stm32f4xx-hal = { version = "0.20.0", features = ["stm32f446"] }
+heapless = "0.8.0"

@@ -1,39 +1,93 @@
 use cortex_m_rt::{exception, ExceptionFrame};
-use crate::task::{OS_CURRENT_TASK, OS_NEXT_TASK};
+use crate::scheduler::{PREVIOUS_TASK, CURRENT_TASK};
 use core::fmt::Write;
 use cortex_m::asm::bkpt;
-use crate::bios;
+use crate::{bios, scheduler};
 
 #[naked]
 #[no_mangle]
 #[allow(non_snake_case)]
+/// Sequence of a context switch
+/// 1. Save all registers to stack we came from
+/// 2. Call kernel_task
+/// 3. Restore registers from next active thread
+/// 4. Return to (potentially different) thread.
 fn PendSV() {
     unsafe {
         core::arch::asm!(
-        // 1. Save r4-r11
-        "push {{r4-r11}}",
-
-        // 2. Save stack pointer to task control block
-        "ldr r0, ={0}", // Load address of OS_CURRENT_TASK into r0
-        "ldr r0, [r0]", // Load contents of OS_CURRENT_TASK into r0
-        "str SP, [r0]", // Store stack pointer into TSB
-
-        // 3. Load next stack pointer from next TSB
-        "ldr r0, ={1}", // Load address of OS_NEXT_TASK into r0
-        "ldr r0, [r0]", // Load contents of OS_NEXT_TASK into r0
-        "ldr SP, [r0]", // Store stack pointer into TSB
-
-        // 3.1 Force Cache Flush? After stack change.
+        // We store MSP to r0 and PSP to r1 for later use.
+        "mrs r0, MSP",
+        "mrs r1, PSP",
+        // Instruction Synchronization Barrier, necessary according to ARM.
         "isb",
-        "dsb",
 
-        // 4. Restore r4-r11
-        "pop {{r4-r11}}",
+        // 1. Save all registers to stack we came from.
+        // We need to store to MSP or PSP depending on bit 2 of LR.
+        // If it is set, we are using PSP, otherwise we are using MSP.
+        "tst LR, #(1<<2)",
+        // Z flag (eq) is set if bit was *not* set.
+        "ite eq",
+        // If "equal" (eq set, bit 2 not set), we increment SP to make space for saved registers.
+        // We save r4-r11 and LR, 9 registers in total, each 4 bytes in size.
+        "subeq SP, SP, (4 * 9)",
+        // Otherwise, we move PSP into r0, since we will use that to push our registers.
+        "movne r0, r1",
+        // ISB here to synchronize after write to SP.
+        "isb",
 
-        // 5. Return to mode we came from.
-        "bx lr",
-        sym OS_CURRENT_TASK,
-        sym OS_NEXT_TASK,
+        // Instruction synchronization barrier to
+
+        // Now, we use r0 as index and Store Multiple while Decrementing Before and write the address
+        // of the last stored back into r0. This is basically push with r0 instead of SP.
+        // Order must match with later loading of those registers as well as stack initialization
+        // for new threads.
+        "stmdb r0!, {{r4-r11, LR}}",
+
+        // Finally, we store the new top of stack into the first member of the previous (switched from)
+        // thread by loading the location of the pointer to it, dereferencing it to obtain the location
+        // of the thread and storing into the first word at that location.
+        "ldr r1, ={previous}",
+        "ldr r1, [r1]",
+        "str r0, [r1]",
+
+        // 2. Previous thread contex has been saved. We can call the kernel_task now.
+        // Calling convention was reverse-engineered.
+        // Save frame pointer and LR for function call.
+        "push {{r7, LR}}",
+        // Move frame pointer for easier debugging.
+        "mov r7, SP",
+        // Call kernel_task.
+        "bl {kernel_task}",
+        // Restore frame pointer and LR.
+        "pop {{r7, LR}}",
+
+        // 3. Restore registers from next active thread.
+        // First, we need to load its stack pointer, similar to the above process.
+        "ldr r1, ={next}",
+        "ldr r1, [r1]",
+        "ldr r0, [r1]",
+
+        // We can safely restore its registers, since it is either PSP (not affected by interrupts
+        // during this PendSV handling, or we already made space for it in a previous switch from
+        // the thread.
+        "ldmia r0!, {{r4-r11, LR}}",
+
+        // Depending on whether we are are returning to a thread on MSP or PSP, we need to set MSP
+        // back to its original location, before it was moved to make space.
+        "tst LR, #(1<<2)",
+        "ite eq",
+        // If we came from MSP, we need to load the original SP. It is stored in r0 again.
+        "msreq MSP, r0",
+        // ITE requires another "else" instruction.
+        "nopne",
+        // ISB again after write to SP.
+        "isb",
+
+        // 4. Return to thread.
+        "bx LR",
+        previous = sym scheduler::PREVIOUS_TASK,
+        next = sym scheduler::CURRENT_TASK,
+        kernel_task = sym kernel_task,
         options(noreturn),
         )
     };
@@ -57,4 +111,10 @@ unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
 
     // Recovery is highly unlikely, so we simply wait for a manual reset and allow debugging.
     loop { bkpt() }
+}
+
+/// General kernel task to run scheduler, copy data, etc.
+/// Requires C calling convention to be called from PendSV.
+extern "C" fn kernel_task() {
+    scheduler::schedule_next();
 }

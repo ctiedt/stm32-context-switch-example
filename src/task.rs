@@ -1,174 +1,127 @@
-use core::ptr::{null_mut};
-use core::mem::MaybeUninit;
-use core::sync::atomic::Ordering;
-use crate::{bios, global_peripherals};
-use cortex_m::register::control::{Fpca, Npriv, Spsel};
-use core::fmt::Write;
+use alloc::boxed::Box;
+use core::ptr::null_mut;
+use crate::scheduler::CURRENT_TASK;
 
-pub(crate) const MAX_TASKS: usize = 8;
-
-pub(crate) static mut TASK_TABLE: TaskTable = TaskTable::new();
-
-pub(crate) struct TaskTable {
-    tasks: [MaybeUninit<Task>; MAX_TASKS],
-    current: usize,
-    size: usize,
-}
-
-impl TaskTable {
-    /// Create a new TaskTable without any tasks.
-    const fn new() -> Self {
-        let tasks = MaybeUninit::uninit_array();
-        Self {
-            tasks,
-            current: 0,
-            size: 0,
-        }
-    }
-
-    pub fn insert_task(&mut self, task: Task) {
-        unsafe { *self.tasks[self.size].assume_init_mut() = task };
-        self.size += 1;
-    }
-
-    pub fn current_task(&mut self) -> &mut Task {
-        unsafe { self.tasks[self.current].assume_init_mut() }
-    }
-
-    pub fn next_task(&mut self) -> Option<&mut Task> {
-        if self.size == 0 {
-            return None;
-        }
-        self.current = (self.current + 1) % self.size;
-        unsafe { Some(self.tasks[self.current].assume_init_mut()) }
-    }
-}
-
+/// Holds all data necessary to start or continue a task.
 #[repr(C)]
 pub(crate) struct Task {
     stack_pointer: *mut u32,
+    handler: Option<Box<dyn FnOnce()>>,
+    next: Option<*mut Task>,
 }
 
 impl Task {
-    /// Create a new dummy Task.
-    /// Stack pointer is invalid and is assumed to be overwritten before first switch to this Task.
-    fn new_dummy() -> Self {
+    /// Create a new Task with a given handler to call upon switching to it.
+    pub(super) fn new(stack: &mut [u32], handler: impl FnOnce() + 'static) -> Self {
+        let top = Self::initialize_stack(stack);
         Self {
-            stack_pointer: null_mut()
+            stack_pointer: top.expect("misaligned stack"),
+            handler: Some(Box::new(handler)),
+            next: None,
         }
     }
 
-    /// Create a new Task with a given stack pointer.
-    fn new(stack: *mut u32) -> Self {
+    /// Create a new Task to represent the idle Task.
+    /// It is assumed that this Task's stack pointer will be written to by the dispatcher before
+    /// ever being switched to. Handler is left empty accordingly.
+    pub(super) fn new_empty() -> Self {
         Self {
-            stack_pointer: stack
+            stack_pointer: null_mut(),
+            handler: None,
+            next: None,
         }
     }
+
+    /// Link to another Task from this one.
+    /// Returns old link.
+    pub(super) fn link_to(&mut self, next: Option<*mut Task>) -> Option<*mut Task> {
+        core::mem::replace(&mut self.next, next)
+    }
+
+    /// Initialize a new stack to switch to and call the default task handler.
+    /// Returns the new top of stack on success and `None` on misalignment.
+    fn initialize_stack(stack: &mut [u32]) -> Option<*mut u32> {
+        /// CPU uses a full descending stack, so SP points to last pushed element.
+        /// This stack is empty, so `top` points just past end initially.
+        let mut top = stack.as_mut_ptr_range().end;
+
+        /// Stack pointer needs to be 4-byte aligned to work at all.
+        if (top as u32 % 4) != 0 {
+            return None;
+        }
+
+        /// Dispatcher requires a valid exception frame to return from, which needs an 8-byte aligned
+        /// stack pointer.
+        let alignment_bytes = (top as u32) % 8;
+        let alignment_required = alignment_bytes != 0;
+        if !alignment_required {
+            top = top.wrapping_sub(1);
+        }
+
+        /// Helper to modify stack.
+        macro_rules! push {
+            ($value:expr) => {unsafe{top = top.wrapping_sub(1); *top = $value;}};
+        }
+
+        /// Could not find bit definition in `cortex_m`, so we need to use magic values to set our initial xPSR.
+        /// **N,Z,C,V,Q** flags (bits 27-31) should be irrelevant, as long as user code does not rely
+        /// on conditional execution in the first instruction.
+        /// **GE** flags (bits 16-19) should also not matter, for the same reason.
+        /// **ICI and TI** (interrupt-continuable and if-then-else flags, bits 25-26) could cause
+        /// immediate push interruptable instructions (push, pop, etc.) or if-then-else blocks to
+        /// misfire. Initializing them to 0 has worked so far.
+        ///
+        /// **Thumb state** (bit 24) must be 1 on thumb CPUs, as ARM instructions are not supported.
+        /// **Bit 9** is used to indicate stack alignment after return from exception.
+        /// Zero=4-byte aligned, One=8-byte aligned.
+        /// **ISR_NUMBER** must be 0 in thread mode, but what happens in handler mode is unclear.
+        /// TODO: Find out what this should be in kernel mode when no syscall is taking place.
+        let alignment_bit = if alignment_required { 0 } else { 1u32 << 9 };
+        let xpsr = 1u32 << 24 | alignment_bit | 1u32;
+
+        /// Bottom of stack needs to be a valid exception frame.
+        /// Initial xPSR value.
+        push!(xpsr);
+        /// Return address (take us to start_task_handler to start task).
+        /// Requires LSB to be 1 to indicate thumb mode.
+        push!(start_task_handler as u32 | 0x1);
+        /// Link Register for [start_task_handler] to use for return.
+        /// Set to an invalid address to cause a fault if it does, to aid debugging.
+        push!(0xffffffff);
+        /// R12, R3-R0
+        push!(12);
+        push!(3);
+        push!(2);
+        push!(1);
+        push!(0);
+
+        /// The remaining registers also need to be saved, they should be in ascending order from
+        /// SP forwards to allow a single instruction to push/pop them.
+        /// R11-R4
+        push!(11);
+        push!(10);
+        push!(9);
+        push!(8);
+        push!(7);
+        push!(6);
+        push!(5);
+        push!(4);
+        /// Link Register with value for Thread mode on PSP without FPU.
+        push!(0xFFFFFFFD);
+
+        Some(top)
+    }
 }
 
-pub(crate) static mut OS_CURRENT_TASK: *mut Task = core::ptr::null_mut();
-pub(crate) static mut OS_NEXT_TASK: *mut Task = core::ptr::null_mut();
-
-/// Hand off control to the scheduler.
-/// Sets up process stack to use provided stack, switches to unprivileged thread mode and starts
-/// execution of `entry`.
-pub(crate) fn start_scheduler(app_stack: &mut [u32], entry: impl FnOnce() -> !) -> ! {
-    initialize_scheduler();
-
-    /// Setup process stack before switching to it.
-    /// Hopefully, we can avoid disabling interrupts for this.
-    let mut top = app_stack.as_mut_ptr_range().end as u32;
-    top = top - top % 8;
-    unsafe { cortex_m::register::psp::write(top) }
-
-    /// Switch to unprivileged thread mode without floating point.
-    let mut control = cortex_m::register::control::read();
-    if control.fpca() != Fpca::NotActive {
-        todo!("floating point mode is not supported yet")
-    }
-    control.set_spsel(Spsel::Psp);
-    control.set_npriv(Npriv::Unprivileged);
-    /// Note: [cortex_m::register::control::write] accesses stack around asm, which will not work
-    /// during stack switching.
+/// Retrieve handler of currently running task.
+fn take_handler() -> Option<Box<dyn FnOnce()>> {
     unsafe {
-        core::arch::asm!(
-        "msr CONTROL, {}",
-        "isb",
-        in(reg) control.bits(),
-        options(nomem, nostack, preserves_flags)
-        )
+        (*CURRENT_TASK).handler.take()
     }
-    /// Ensure memory accesses are not reordered around the CONTROL update.
-    /// Copied from [cortex_m::register::control::write].
-    core::sync::atomic::compiler_fence(Ordering::SeqCst);
-
-    /// We are now in unprivileged thread mode!
-    /// Call our main thread.
-    entry()
 }
 
-/// Initialize scheduler structures with dummy data to allow a context switch.
-fn initialize_scheduler() {
-    /// Setup task table using a dummy task. At least one task is required for a context switch to
-    /// work, since the stack pointer is written/read to/from the last/next task.
-    let app_task = Task::new_dummy();
-    unsafe {
-        TASK_TABLE.insert_task(app_task);
-        OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to initialize dummy task");
-        // Required to have a valid reference during first scheduler run.
-        OS_CURRENT_TASK = OS_NEXT_TASK;
-    }
-
-    let mut output = bios::buffered_output();
-    writeln!(output, "Started scheduler!").unwrap();
-}
-
-
-pub(crate) fn schedule_next_task() {
-    unsafe { OS_CURRENT_TASK = OS_NEXT_TASK; }
-    unsafe { OS_NEXT_TASK = TASK_TABLE.next_task().expect("failed to get next task") };
-
-    let mut output = bios::buffered_output();
-    writeln!(output, "scheduled task {:?}", unsafe { OS_NEXT_TASK }).unwrap();
-}
-
-pub(crate) fn create_task(handler: fn() -> (), _params: *const (), stack: &mut [u32]) {
-    // Stacks grow down, so we take the pointer just past the end
-    let mut top = stack.as_mut_ptr_range().end;
-
-    macro_rules! push {
-        ($value:expr) => {unsafe{top = top.wrapping_sub(1); *top = $value;}};
-    }
-
-    // xPSR
-    push!(1u32 << 24);
-    // PC
-    push!((handler as u32) | 0x1);
-    // Address for task finished function
-    push!((task_finished as u32) | 0x1);
-    // R12, R3-R0
-    push!(12);
-    push!(3);
-    push!(2);
-    push!(1);
-    push!(0);
-    // R4-R11 + LR (popped in reverse)
-    // push!(0xFFFFFFF9u32);
-    push!(11);
-    push!(10);
-    push!(9);
-    push!(8);
-    push!(7);
-    push!(6);
-    push!(5);
-    push!(4);
-
-    let task = Task::new(top);
-    unsafe { TASK_TABLE.insert_task(task); }
-}
-
-fn task_finished() {
-    loop {
-        cortex_m::asm::bkpt();
-    }
+extern "C" fn start_task_handler() -> ! {
+    let handler = take_handler().expect("task handler was empty");
+    handler();
+    loop {}
 }
