@@ -44,11 +44,12 @@ pub enum SyscallError {
 }
 
 /// Helper function to decode errors from an argument array.
-fn decode_error(code: u32, args: &[u32]) -> SyscallError {
-    match code {
-        x if x == ReturnCode::NotImplemented as u32 => SyscallError::NotImplemented,
-        x if x == ReturnCode::IncrementPastTen as u32 => SyscallError::IncrementPastTen,
-        x if x == ReturnCode::InsufficientSpace as u32 => SyscallError::InsufficientSpace(args[0] as usize),
-        other => SyscallError::Unknown(other),
+fn decode_result(r0: u32, r1: u32) -> Result<u32, SyscallError> {
+    match r0 {
+        x if x == ReturnCode::Ok as u32 => Ok(r1),
+        x if x == ReturnCode::NotImplemented as u32 => Err(SyscallError::NotImplemented),
+        x if x == ReturnCode::IncrementPastTen as u32 => Err(SyscallError::IncrementPastTen),
+        x if x == ReturnCode::InsufficientSpace as u32 => Err(SyscallError::InsufficientSpace(r1 as usize)),
+        other => Err(SyscallError::Unknown(other)),
     }
 }

@@ -55,19 +55,10 @@ pub unsafe fn SVCall() {
 pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
     let number = get_syscall_number(stack_pointer).expect("invalid syscall number");
     let args = get_syscall_arguments(stack_pointer);
-    let (result, args) = args.split_at_mut(1);
 
-    // Execute corresponding syscall handler.
-    // Data return values from handlers are returned using args.
-    let call_result = match number {
-        SyscallNumber::Increment => handle_syscall_increment(args),
+    match number {
         SyscallNumber::Write => handle_syscall_write(args),
-        _ => Err(ReturnCode::NotImplemented)
-    };
-
-    match call_result {
-        Ok(_) => result[0] = 0,
-        Err(e) => result[0] = e as u32,
+        SyscallNumber::Increment => handle_syscall_increment(args),
     }
 }
 
@@ -86,34 +77,36 @@ unsafe fn get_syscall_number(stack_pointer: *const u32) -> Option<SyscallNumber>
 }
 
 /// Extract syscall arguments from count and pointer on stack.
-unsafe fn get_syscall_arguments(stack_pointer: *const u32) -> &'static mut [u32] {
-    let count = *stack_pointer as usize;
-    let pointer = *stack_pointer.add(1) as *mut u32;
-    core::slice::from_raw_parts_mut(pointer, count)
+unsafe fn get_syscall_arguments(stack_pointer: *mut u32) -> &'static mut [u32] {
+    core::slice::from_raw_parts_mut(stack_pointer, 2)
 }
 
-unsafe fn handle_syscall_increment(args: &mut [u32]) -> Result<(), ReturnCode> {
-    if args[0] < 10 {
-        args[0] += 1;
-        Ok(())
+
+unsafe fn handle_syscall_increment(args: &mut [u32]) {
+    let value = args[0];
+    if value < 10 {
+        args[0] = ReturnCode::Ok as u32;
+        args[1] = value + 1;
     } else {
-        Err(ReturnCode::IncrementPastTen)
+        args[0] = ReturnCode::IncrementPastTen as u32;
     }
 }
 
-unsafe fn handle_syscall_write(args: &mut [u32]) -> Result<(), ReturnCode> {
+unsafe fn handle_syscall_write(args: &mut [u32]) {
     let len = args[0] as usize;
     let ptr = args[1] as *const u8;
     let buffer = core::slice::from_raw_parts(ptr, len);
     let mut output = bios::buffered_output();
     match output.append(buffer) {
         Ok(count) => {
-            args[0] = count as u32;
-            Ok(())
+            // All bytes sent, notify caller by return code.
+            args[0] = ReturnCode::Ok as u32;
+            args[1] = count as u32;
         }
         Err(appended) => {
-            args[0] = appended as u32;
-            Err(ReturnCode::InsufficientSpace)
+            // Not all bytes were sent, notify caller.
+            args[0] = ReturnCode::InsufficientSpace as u32;
+            args[1] = appended as u32;
         }
     }
 }

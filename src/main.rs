@@ -22,6 +22,7 @@ use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{pac::{self}, prelude::*, serial::{Config}};
 use stm32f4xx_hal::timer::SysEvent;
 use task::{OS_CURRENT_TASK};
+use crate::syscalls::SyscallError;
 use crate::task::{schedule_next_task, start_scheduler};
 
 mod dispatcher;
@@ -140,10 +141,40 @@ fn send_blocking(message: &str) -> Result<(), syscalls::SyscallError> {
     Ok(())
 }
 
+struct BlockingWriter;
+
+impl Write for BlockingWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let buffer = s.as_bytes();
+        let mut count = 0;
+        while count < buffer.len() {
+            let to_send = &buffer[count..];
+            match syscalls::stubs::write(to_send) {
+                Ok(c) => count += c,
+                Err(syscalls::SyscallError::InsufficientSpace(c)) => count += c,
+                Err(other) => { return Err(Default::default()); }
+            }
+        };
+        Ok(())
+    }
+}
+
 fn app() -> ! {
-    let very_long_message = include_str!("main.rs");
+    let mut writer = BlockingWriter;
+    let very_long_message = &include_str!("main.rs")[0..512];
+    let mut value = 0u32;
     loop {
         send_blocking(very_long_message).expect("sending failed");
-        delay(8_000_000);
+        match syscalls::stubs::increment(value) {
+            Ok(next) => {
+                value = next;
+                writeln!(writer, "value={}", value).unwrap();
+            }
+            Err(error) => {
+                writeln!(writer, "cannot increment: {:?}", error).unwrap();
+                value = 0;
+            }
+        }
+        delay(8_000_000 / 10);
     }
 }
