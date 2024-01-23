@@ -31,13 +31,13 @@ unsafe fn get_idle_task_ptr() -> *mut Task {
 }
 
 /// Ring-shaped linked list of all available tasks.
-static mut TASK_LIST: Option<*mut Task> = None;
+static mut TASK_LIST: *mut Task = core::ptr::null_mut();
 
 /// Insert a new Task into the list of available Tasks.
 fn insert_task(task: *mut Task) {
     unsafe {
-        (*task).link_to(TASK_LIST.take());
-        TASK_LIST = Some(task);
+        (*task).link_to(TASK_LIST);
+        TASK_LIST = task;
     }
 }
 
@@ -107,29 +107,30 @@ pub fn execute_task() -> bool {
 
 /// Find a non-blocked Task in a list of Tasks.
 fn find_runnable(mut head: *mut Task) -> Option<*mut Task> {
-    if head.is_null() {
-        return None;
-    }
     unsafe {
-        loop {
+        while !head.is_null() {
             if !(*head).is_blocked() {
                 return Some(head);
             } else {
-                head = match (*head).next() {
-                    None => { return None; }
-                    Some(next) => next,
-                }
+                head = (*head).next();
             }
         }
     }
+    None
 }
 
 pub(crate) fn schedule_next() {
-    // Round-robin.
-    let next = match unsafe { find_runnable(NEXT_TASK) } {
-        None => unsafe { get_idle_task_ptr() },
-        Some(next) => next,
+    let next = unsafe {
+        // First, try to find a runnable Task after the current one.
+        if let Some(next) = find_runnable((*NEXT_TASK).next()) {
+            next
+        } else if let Some(any) = find_runnable(TASK_LIST) {
+            any
+        } else {
+            get_idle_task_ptr()
+        }
     };
+
     unsafe {
         PREVIOUS_TASK = NEXT_TASK;
         NEXT_TASK = next;

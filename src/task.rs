@@ -7,7 +7,7 @@ use crate::scheduler::NEXT_TASK;
 pub(crate) struct Task {
     stack_pointer: *mut u32,
     handler: Option<Box<dyn FnOnce()>>,
-    next: Option<*mut Task>,
+    next: *mut Task,
     is_blocked: bool,
 }
 
@@ -18,7 +18,7 @@ impl Task {
         Self {
             stack_pointer: top.expect("misaligned stack"),
             handler: Some(Box::new(handler)),
-            next: None,
+            next: null_mut(),
             is_blocked: false,
         }
     }
@@ -30,20 +30,20 @@ impl Task {
         Self {
             stack_pointer: null_mut(),
             handler: None,
-            next: None,
+            next: null_mut(),
             is_blocked: false,
         }
     }
 
     /// Link to another Task from this one.
     /// Returns old link.
-    pub(super) fn link_to(&mut self, next: Option<*mut Task>) -> Option<*mut Task> {
+    pub(super) fn link_to(&mut self, next: *mut Task) -> *mut Task {
         core::mem::replace(&mut self.next, next)
     }
 
     /// Get pointer to next Task in linked list.
-    pub(super) fn next(&self) -> Option<*mut Task> {
-        self.next.clone()
+    pub(super) fn next(&self) -> *mut Task {
+        self.next
     }
 
     /// Set block state of this Task. Return old state.
