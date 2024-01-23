@@ -18,7 +18,7 @@ static mut KERNEL_TASK_QUEUE: Queue<KernelTask, KERNEL_TASK_COUNT> = Queue::new(
 
 /// Pointers to previous (switched from) and current (switched to) Tasks.
 pub(super) static mut PREVIOUS_TASK: *mut Task = core::ptr::null_mut();
-pub(super) static mut CURRENT_TASK: *mut Task = core::ptr::null_mut();
+pub(super) static mut NEXT_TASK: *mut Task = core::ptr::null_mut();
 
 
 /// Idle [Task] used when no others can run.
@@ -47,13 +47,13 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
         (*app_task_ptr).link_to(Some(app_task_ptr));
     }
 
-    /// Set idle task as initial "switched from" and "switched to" task because this function will
-    /// become the idle task.
+    /// Set idle task as initial "switched from" task and app as "switched to" task to simulate a
+    /// switch from a previously idle system.
     unsafe {
         PREVIOUS_TASK = get_idle_task_ptr();
-        CURRENT_TASK = get_idle_task_ptr();
+        NEXT_TASK = app_task_ptr;
     }
-    
+
 
     /// Notify kernel to turn off privileged execution for threads.
     enqueue_task(KernelTask::LowerThreadPrivileges).expect("failed to enqueue privilege lowering task");
@@ -96,4 +96,14 @@ pub fn execute_task() {
     }
 }
 
-pub(crate) fn schedule_next() {}
+pub(crate) fn schedule_next() {
+    // Round-robin.
+    let next = match unsafe { (*NEXT_TASK).next() } {
+        None => unsafe { get_idle_task_ptr() },
+        Some(next) => next,
+    };
+    unsafe {
+        PREVIOUS_TASK = NEXT_TASK;
+        NEXT_TASK = next;
+    }
+}

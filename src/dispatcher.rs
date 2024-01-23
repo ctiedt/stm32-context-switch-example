@@ -1,5 +1,4 @@
 use cortex_m_rt::{exception, ExceptionFrame};
-use crate::scheduler::{PREVIOUS_TASK, CURRENT_TASK};
 use core::fmt::Write;
 use cortex_m::asm::bkpt;
 use crate::{bios, scheduler};
@@ -78,15 +77,15 @@ fn PendSV() {
         "ite eq",
         // If we came from MSP, we need to load the original SP. It is stored in r0 again.
         "msreq MSP, r0",
-        // ITE requires another "else" instruction.
-        "nopne",
+        // Otherwise, restore PSP.
+        "msrne PSP, r0",
         // ISB again after write to SP.
         "isb",
 
         // 4. Return to thread.
         "bx LR",
         previous = sym scheduler::PREVIOUS_TASK,
-        next = sym scheduler::CURRENT_TASK,
+        next = sym scheduler::NEXT_TASK,
         kernel_task = sym kernel_task,
         options(noreturn),
         )

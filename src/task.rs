@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use core::ptr::null_mut;
-use crate::scheduler::CURRENT_TASK;
+use crate::scheduler::NEXT_TASK;
 
 /// Holds all data necessary to start or continue a task.
 #[repr(C)]
@@ -36,6 +36,11 @@ impl Task {
     /// Returns old link.
     pub(super) fn link_to(&mut self, next: Option<*mut Task>) -> Option<*mut Task> {
         core::mem::replace(&mut self.next, next)
+    }
+
+    /// Get pointer to next Task in linked list.
+    pub(super) fn next(&self) -> Option<*mut Task> {
+        self.next.clone()
     }
 
     /// Initialize a new stack to switch to and call the default task handler.
@@ -74,10 +79,10 @@ impl Task {
         /// **Thumb state** (bit 24) must be 1 on thumb CPUs, as ARM instructions are not supported.
         /// **Bit 9** is used to indicate stack alignment after return from exception.
         /// Zero=4-byte aligned, One=8-byte aligned.
-        /// **ISR_NUMBER** must be 0 in thread mode, but what happens in handler mode is unclear.
+        /// **ISR_NUMBER** must be 0 in thread mode.
         /// TODO: Find out what this should be in kernel mode when no syscall is taking place.
         let alignment_bit = if alignment_required { 0 } else { 1u32 << 9 };
-        let xpsr = 1u32 << 24 | alignment_bit | 1u32;
+        let xpsr = 1u32 << 24 | alignment_bit;
 
         /// Bottom of stack needs to be a valid exception frame.
         /// Initial xPSR value.
@@ -87,7 +92,7 @@ impl Task {
         push!(start_task_handler as u32 | 0x1);
         /// Link Register for [start_task_handler] to use for return.
         /// Set to an invalid address to cause a fault if it does, to aid debugging.
-        push!(0xffffffff);
+        push!(0xfffffffd);
         /// R12, R3-R0
         push!(12);
         push!(3);
@@ -97,6 +102,8 @@ impl Task {
 
         /// The remaining registers also need to be saved, they should be in ascending order from
         /// SP forwards to allow a single instruction to push/pop them.
+        /// Link Register with value for Thread mode on PSP without FPU.
+        push!(0xFFFFFFFD);
         /// R11-R4
         push!(11);
         push!(10);
@@ -106,8 +113,6 @@ impl Task {
         push!(6);
         push!(5);
         push!(4);
-        /// Link Register with value for Thread mode on PSP without FPU.
-        push!(0xFFFFFFFD);
 
         Some(top)
     }
@@ -116,7 +121,7 @@ impl Task {
 /// Retrieve handler of currently running task.
 fn take_handler() -> Option<Box<dyn FnOnce()>> {
     unsafe {
-        (*CURRENT_TASK).handler.take()
+        (*NEXT_TASK).handler.take()
     }
 }
 
