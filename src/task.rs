@@ -80,7 +80,6 @@ impl Task {
         /// **Bit 9** is used to indicate stack alignment after return from exception.
         /// Zero=4-byte aligned, One=8-byte aligned.
         /// **ISR_NUMBER** must be 0 in thread mode.
-        /// TODO: Find out what this should be in kernel mode when no syscall is taking place.
         let alignment_bit = if alignment_required { 0 } else { 1u32 << 9 };
         let xpsr = 1u32 << 24 | alignment_bit;
 
