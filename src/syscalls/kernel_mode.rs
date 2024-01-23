@@ -2,6 +2,7 @@
 //! Deals with reading call number and arguments from stack and executing the actual calls.
 
 use crate::bios;
+use crate::scheduler::NEXT_TASK;
 use crate::syscalls::SyscallError;
 use super::ReturnCode;
 
@@ -59,6 +60,7 @@ pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
     match number {
         SyscallNumber::Write => handle_syscall_write(args),
         SyscallNumber::Increment => handle_syscall_increment(args),
+        SyscallNumber::Block => handle_syscall_block(args),
     }
 }
 
@@ -111,11 +113,18 @@ unsafe fn handle_syscall_write(args: &mut [u32]) {
     }
 }
 
+unsafe fn handle_syscall_block(args: &mut [u32]) {
+    let current = NEXT_TASK;
+    (*current).set_blocked(true);
+    cortex_m::peripheral::SCB::set_pendsv();
+}
+
 /// Internal representation of system calls.
 #[derive(Debug)]
 pub(super) enum SyscallNumber {
     Increment,
     Write,
+    Block,
 }
 
 impl SyscallNumber {
@@ -123,6 +132,7 @@ impl SyscallNumber {
         match imm {
             x if x == Self::Increment as u8 => Some(Self::Increment),
             x if x == Self::Write as u8 => Some(Self::Write),
+            x if x == Self::Block as u8 => Some(Self::Block),
             other => None,
         }
     }

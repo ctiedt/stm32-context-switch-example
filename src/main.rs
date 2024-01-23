@@ -173,7 +173,8 @@ fn app() {
             }
             Err(error) => {
                 writeln!(writer, "cannot increment: {:?}", error).unwrap();
-                value = 0;
+                writeln!(writer, "blocking thread").unwrap();
+                syscalls::stubs::block();
             }
         }
         delay(8_000_000 / 10);

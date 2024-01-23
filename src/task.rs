@@ -8,6 +8,7 @@ pub(crate) struct Task {
     stack_pointer: *mut u32,
     handler: Option<Box<dyn FnOnce()>>,
     next: Option<*mut Task>,
+    is_blocked: bool,
 }
 
 impl Task {
@@ -18,6 +19,7 @@ impl Task {
             stack_pointer: top.expect("misaligned stack"),
             handler: Some(Box::new(handler)),
             next: None,
+            is_blocked: false,
         }
     }
 
@@ -29,6 +31,7 @@ impl Task {
             stack_pointer: null_mut(),
             handler: None,
             next: None,
+            is_blocked: false,
         }
     }
 
@@ -41,6 +44,16 @@ impl Task {
     /// Get pointer to next Task in linked list.
     pub(super) fn next(&self) -> Option<*mut Task> {
         self.next.clone()
+    }
+
+    /// Set block state of this Task. Return old state.
+    pub(super) fn set_blocked(&mut self, value: bool) -> bool {
+        core::mem::replace(&mut self.is_blocked, value)
+    }
+
+    /// Get blocked state of this Task.
+    pub(super) fn is_blocked(&self) -> bool {
+        self.is_blocked
     }
 
     /// Initialize a new stack to switch to and call the default task handler.

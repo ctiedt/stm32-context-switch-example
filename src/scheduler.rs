@@ -33,6 +33,15 @@ unsafe fn get_idle_task_ptr() -> *mut Task {
 /// Ring-shaped linked list of all available tasks.
 static mut TASK_LIST: Option<*mut Task> = None;
 
+/// Insert a new Task into the list of available Tasks.
+fn insert_task(task: *mut Task) {
+    unsafe {
+        (*task).link_to(TASK_LIST.take());
+        TASK_LIST = Some(task);
+    }
+}
+
+
 pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnce() + 'static) -> ! {
     /// Create and save idle Task to switch to later.
     unsafe {
@@ -40,12 +49,10 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
         IDLE_TASK = Some(idle_task);
     }
 
-    /// Create application Task and link it to itself.
+    /// Create application Task and insert it into Task list.
     let app_task = Task::new(app_stack, app);
     let app_task_ptr = Box::into_raw(Box::new(app_task));
-    unsafe {
-        (*app_task_ptr).link_to(Some(app_task_ptr));
-    }
+    insert_task(app_task_ptr);
 
     /// Set idle task as initial "switched from" task and app as "switched to" task to simulate a
     /// switch from a previously idle system.
@@ -96,9 +103,28 @@ pub fn execute_task() {
     }
 }
 
+/// Find a non-blocked Task in a list of Tasks.
+fn find_runnable(mut head: *mut Task) -> Option<*mut Task> {
+    if head.is_null() {
+        return None;
+    }
+    unsafe {
+        loop {
+            if !(*head).is_blocked() {
+                return Some(head);
+            } else {
+                head = match (*head).next() {
+                    None => { return None; }
+                    Some(next) => next,
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn schedule_next() {
     // Round-robin.
-    let next = match unsafe { (*NEXT_TASK).next() } {
+    let next = match unsafe { find_runnable(NEXT_TASK) } {
         None => unsafe { get_idle_task_ptr() },
         Some(next) => next,
     };
