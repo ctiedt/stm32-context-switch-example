@@ -115,5 +115,6 @@ unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
 /// General kernel task to run scheduler, copy data, etc.
 /// Requires C calling convention to be called from PendSV.
 extern "C" fn kernel_task() {
+    while scheduler::execute_task() {}
     scheduler::schedule_next();
 }

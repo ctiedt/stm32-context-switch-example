@@ -88,9 +88,10 @@ pub fn enqueue_task(task: KernelTask) -> Result<(), KernelTask> {
 }
 
 /// Execute a kernel mode task, if available.
-pub fn execute_task() {
+/// Returns `true` if a task was executed.
+pub fn execute_task() -> bool {
     let task = match unsafe { KERNEL_TASK_QUEUE.dequeue() } {
-        None => { return; }
+        None => { return false; }
         Some(task) => task
     };
 
@@ -101,6 +102,7 @@ pub fn execute_task() {
             unsafe { cortex_m::register::control::write(control); }
         }
     }
+    true
 }
 
 /// Find a non-blocked Task in a list of Tasks.
