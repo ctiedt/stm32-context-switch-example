@@ -145,26 +145,25 @@ impl Write for BlockingWriter {
     }
 }
 
+fn is_prime(number: u32) -> bool {
+    for x in 2..number {
+        if number % x == 0 {
+            return false;
+        }
+    }
+    return true;
+}
+
 fn app() {
     // Spawn blinker thread first.
     syscalls::stubs::spawn_task(blink_task, unsafe { &mut BLINK_STACK }).expect("failed to start blink thread");
 
-    let mut writer = BlockingWriter;
-    let very_long_message = include_str!("text.txt");
-    let mut value = 0u32;
+    let mut number = 2;
     loop {
-        // writeln!(writer, "{}", very_long_message).expect("sending failed");
-        match syscalls::stubs::increment(value) {
-            Ok(next) => {
-                value = next;
-                writeln!(writer, "value={}", value).unwrap();
-            }
-            Err(error) => {
-                writeln!(writer, "cannot increment: {:?}", error).unwrap();
-                value = 0;
-            }
+        if is_prime(number) {
+            writeln!(BlockingWriter, "found prime {}", number).unwrap();
         }
-        delay(8_000_000 / 10);
+        number += 1;
     }
 }
 
