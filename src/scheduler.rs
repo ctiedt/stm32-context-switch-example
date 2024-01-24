@@ -70,7 +70,7 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
     /// Start SysTick and with that preemptive scheduling.
     let mut systick = syst.counter_hz(&clocks);
     systick.listen(SysEvent::Update);
-    systick.start(1.Hz()).unwrap();
+    systick.start(1000.Hz()).unwrap();
 
     /// Enter idle loop.
     loop {}
