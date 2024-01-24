@@ -45,7 +45,7 @@ fn PendSV() {
         // Finally, we store the new top of stack into the first member of the previous (switched from)
         // thread by loading the location of the pointer to it, dereferencing it to obtain the location
         // of the thread and storing into the first word at that location.
-        "ldr r1, ={previous}",
+        "ldr r1, ={current}",
         "ldr r1, [r1]",
         "str r0, [r1]",
 
@@ -62,7 +62,7 @@ fn PendSV() {
 
         // 3. Restore registers from next active thread.
         // First, we need to load its stack pointer, similar to the above process.
-        "ldr r1, ={next}",
+        "ldr r1, ={current}",
         "ldr r1, [r1]",
         "ldr r0, [r1]",
 
@@ -84,8 +84,7 @@ fn PendSV() {
 
         // 4. Return to thread.
         "bx LR",
-        previous = sym scheduler::PREVIOUS_TASK,
-        next = sym scheduler::NEXT_TASK,
+        current = sym scheduler::CURRENT_TASK,
         kernel_task = sym kernel_task,
         options(noreturn),
         )
@@ -115,6 +114,6 @@ unsafe fn HardFault(frame: &ExceptionFrame) -> ! {
 /// General kernel task to run scheduler, copy data, etc.
 /// Requires C calling convention to be called from PendSV.
 extern "C" fn kernel_task() {
-    while scheduler::execute_task() {}
+    scheduler::complete_tasks();
     scheduler::schedule_next();
 }

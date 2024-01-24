@@ -2,7 +2,7 @@
 //! Deals with reading call number and arguments from stack and executing the actual calls.
 
 use crate::{bios, scheduler};
-use crate::scheduler::{KernelTask, NEXT_TASK};
+use crate::scheduler::{CURRENT_TASK, KernelTask};
 use crate::syscalls::SyscallError;
 use super::ReturnCode;
 
@@ -97,7 +97,7 @@ unsafe fn handle_syscall_increment(args: &mut [u32]) {
 unsafe fn handle_syscall_write(args: &mut [u32]) {
     let len = args[0] as usize;
     let ptr = args[1] as *const u8;
-    let task = NEXT_TASK;
+    let task = CURRENT_TASK;
     let kernel_task = KernelTask::WriteTx {
         args: args.as_mut_ptr(),
         total: len,
@@ -118,7 +118,7 @@ unsafe fn handle_syscall_write(args: &mut [u32]) {
 }
 
 unsafe fn handle_syscall_block(args: &mut [u32]) {
-    let current = NEXT_TASK;
+    let current = CURRENT_TASK;
     (*current).set_blocked(true);
     cortex_m::peripheral::SCB::set_pendsv();
 }

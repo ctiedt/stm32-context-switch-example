@@ -18,9 +18,8 @@ const KERNEL_TASK_COUNT: usize = 16;
 /// Queue of tasks to run in kernel mode.
 static mut KERNEL_TASK_QUEUE: Queue<KernelTask, KERNEL_TASK_COUNT> = Queue::new();
 
-/// Pointers to previous (switched from) and current (switched to) Tasks.
-pub(super) static mut PREVIOUS_TASK: *mut Task = core::ptr::null_mut();
-pub(super) static mut NEXT_TASK: *mut Task = core::ptr::null_mut();
+/// Currently running Task.
+pub(super) static mut CURRENT_TASK: *mut Task = core::ptr::null_mut();
 
 
 /// Idle [Task] used when no others can run.
@@ -56,13 +55,10 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
     let app_task_ptr = Box::into_raw(Box::new(app_task));
     insert_task(app_task_ptr);
 
-    /// Set idle task as initial "switched from" task and app as "switched to" task to simulate a
-    /// switch from a previously idle system.
+    /// Set idle task as initially running Task.
     unsafe {
-        PREVIOUS_TASK = get_idle_task_ptr();
-        NEXT_TASK = app_task_ptr;
+        CURRENT_TASK = get_idle_task_ptr();
     }
-
 
     /// Notify kernel to turn off privileged execution for threads.
     enqueue_task(KernelTask::LowerThreadPrivileges).expect("failed to enqueue privilege lowering task");
@@ -70,7 +66,7 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
     /// Start SysTick and with that preemptive scheduling.
     let mut systick = syst.counter_hz(&clocks);
     systick.listen(SysEvent::Update);
-    systick.start(1000.Hz()).unwrap();
+    systick.start(1.Hz()).unwrap();
 
     /// Enter idle loop.
     loop {}
@@ -103,18 +99,14 @@ pub fn enqueue_task(task: KernelTask) -> Result<(), KernelTask> {
 }
 
 /// Execute a kernel mode task, if available.
-/// Returns `true` if a task was executed.
-pub fn execute_task() -> bool {
-    let task = match unsafe { KERNEL_TASK_QUEUE.dequeue() } {
-        None => { return false; }
-        Some(task) => task
-    };
-
+/// Returns new Task if the current one should be continued in the next dispatcher call.
+pub fn execute_task(task: KernelTask) -> Option<KernelTask> {
     match task {
         KernelTask::LowerThreadPrivileges => {
             let mut control = cortex_m::register::control::read();
             control.set_npriv(Npriv::Unprivileged);
             unsafe { cortex_m::register::control::write(control); }
+            None
         }
         KernelTask::WriteTx { args, total, left: len, data, task } => {
             let buffer = unsafe { core::slice::from_raw_parts(data, len) };
@@ -126,23 +118,24 @@ pub fn execute_task() -> bool {
                     args[0] = ReturnCode::Ok as u32;
                     args[1] = total as u32;
                     (*task).set_blocked(false);
+                    None
                 }
                 Err(appended) => {
+                    // Not finished, continue in next dispatch call.
                     let left = len - appended;
                     let data = data.wrapping_add(appended);
-                    let new_task = KernelTask::WriteTx {
+                    let continuation = KernelTask::WriteTx {
                         args,
                         total,
                         left,
                         data,
                         task,
                     };
-                    enqueue_task(new_task).expect("failed to continue write");
+                    Some(continuation)
                 }
             }
         }
     }
-    true
 }
 
 /// Find a non-blocked Task in a list of Tasks.
@@ -162,7 +155,7 @@ fn find_runnable(mut head: *mut Task) -> Option<*mut Task> {
 pub(crate) fn schedule_next() {
     let next = unsafe {
         // First, try to find a runnable Task after the current one.
-        if let Some(next) = find_runnable((*NEXT_TASK).next()) {
+        if let Some(next) = find_runnable((*CURRENT_TASK).next()) {
             next
         } else if let Some(any) = find_runnable(TASK_LIST) {
             any
@@ -172,7 +165,20 @@ pub(crate) fn schedule_next() {
     };
 
     unsafe {
-        PREVIOUS_TASK = NEXT_TASK;
-        NEXT_TASK = next;
+        CURRENT_TASK = next;
     }
+}
+
+/// Work through the queued up tasks and append any new ones for the next call to complete_tasks.
+pub(crate) fn complete_tasks() {
+    // Hold continued tasks in another queue to avoid blocking the dispatcher.
+    let mut continuations: Queue<KernelTask, KERNEL_TASK_COUNT> = Queue::new();
+    while let Some(task) = unsafe { KERNEL_TASK_QUEUE.dequeue() } {
+        if let Some(new_task) = execute_task(task) {
+            continuations.enqueue(new_task).expect("cannot create more tasks in dispatcher");
+        }
+    }
+
+    // Swap out old (empty) task queue with new one.
+    unsafe { KERNEL_TASK_QUEUE = continuations }
 }

@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use core::ptr::null_mut;
-use crate::scheduler::NEXT_TASK;
+use crate::scheduler::CURRENT_TASK;
 
 /// Holds all data necessary to start or continue a task.
 #[repr(C)]
@@ -25,13 +25,14 @@ impl Task {
 
     /// Create a new Task to represent the idle Task.
     /// It is assumed that this Task's stack pointer will be written to by the dispatcher before
-    /// ever being switched to. Handler is left empty accordingly.
+    /// ever being switched to. Handler is left empty accordingly. Marked as blocked so the kernel
+    /// must explicitly unblock it.
     pub(super) fn new_empty() -> Self {
         Self {
             stack_pointer: null_mut(),
             handler: None,
             next: null_mut(),
-            is_blocked: false,
+            is_blocked: true,
         }
     }
 
@@ -133,7 +134,7 @@ impl Task {
 /// Retrieve handler of currently running task.
 fn take_handler() -> Option<Box<dyn FnOnce()>> {
     unsafe {
-        (*NEXT_TASK).handler.take()
+        (*CURRENT_TASK).handler.take()
     }
 }
 
