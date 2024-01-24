@@ -65,7 +65,7 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
     /// Start SysTick and with that preemptive scheduling.
     let mut systick = syst.counter_hz(&clocks);
     systick.listen(SysEvent::Update);
-    systick.start(1.Hz()).unwrap();
+    systick.start(1000.Hz()).unwrap();
 
     /// Enter idle loop.
     loop {}
@@ -98,6 +98,8 @@ pub enum KernelTask {
         /// Size of provided stack.
         stack_size: usize,
     },
+    /// Unblock a Task from running.
+    Unblock(*mut Task),
 }
 
 /// Attempt to enqueue a new kernel mode task.
@@ -117,6 +119,8 @@ pub fn execute_task(task: KernelTask) -> Option<KernelTask> {
             None
         }
         KernelTask::WriteTx { args, total, left: len, data, task } => {
+            // Block Task to let others run in the meantime.
+            unsafe { (*task).set_blocked(true); }
             let buffer = unsafe { core::slice::from_raw_parts(data, len) };
             let mut tx = bios::buffered_output();
             match tx.append(buffer) {
@@ -125,8 +129,8 @@ pub fn execute_task(task: KernelTask) -> Option<KernelTask> {
                     let args = core::slice::from_raw_parts_mut(args, 2);
                     args[0] = ReturnCode::Ok as u32;
                     args[1] = total as u32;
-                    (*task).set_blocked(false);
-                    None
+                    // Unblock Task in the next switch.
+                    Some(KernelTask::Unblock(task))
                 }
                 Err(appended) => {
                     // Not finished, continue in next dispatch call.
@@ -147,6 +151,10 @@ pub fn execute_task(task: KernelTask) -> Option<KernelTask> {
             let stack = unsafe { core::slice::from_raw_parts_mut(stack, stack_size) };
             let task = Task::new(stack, f);
             insert_task(task);
+            None
+        }
+        KernelTask::Unblock(task) => unsafe {
+            (*task).set_blocked(false);
             None
         }
     }

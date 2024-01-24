@@ -153,7 +153,7 @@ fn app() {
     let very_long_message = include_str!("text.txt");
     let mut value = 0u32;
     loop {
-        writeln!(writer, "{}", very_long_message).expect("sending failed");
+        // writeln!(writer, "{}", very_long_message).expect("sending failed");
         match syscalls::stubs::increment(value) {
             Ok(next) => {
                 value = next;
@@ -161,6 +161,7 @@ fn app() {
             }
             Err(error) => {
                 writeln!(writer, "cannot increment: {:?}", error).unwrap();
+                value = 0;
             }
         }
         delay(8_000_000 / 10);
