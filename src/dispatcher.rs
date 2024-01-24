@@ -28,13 +28,11 @@ fn PendSV() {
         "ite eq",
         // If "equal" (eq set, bit 2 not set), we increment SP to make space for saved registers.
         // We save r4-r11 and LR, 9 registers in total, each 4 bytes in size.
-        "subeq SP, SP, (4 * 9)",
+        "subeq SP, (4 * 9)",
         // Otherwise, we move PSP into r0, since we will use that to push our registers.
         "movne r0, r1",
         // ISB here to synchronize after write to SP.
         "isb",
-
-        // Instruction synchronization barrier to
 
         // Now, we use r0 as index and Store Multiple while Decrementing Before and write the address
         // of the last stored back into r0. This is basically push with r0 instead of SP.
