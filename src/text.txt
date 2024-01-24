@@ -1,0 +1,2 @@
+This is a long debug message designed to be larger than the TX buffer as to require a continuation during the next switch.
+It has to be recognizable and longer than 128 characters. It also should explicitly state its end to make it more readable.

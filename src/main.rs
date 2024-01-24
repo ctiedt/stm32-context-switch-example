@@ -147,7 +147,7 @@ impl Write for BlockingWriter {
 
 fn app() {
     let mut writer = BlockingWriter;
-    let very_long_message = &include_str!("main.rs")[0..512];
+    let very_long_message = include_str!("text.txt");
     let mut value = 0u32;
     loop {
         writeln!(writer, "{}", very_long_message).expect("sending failed");
