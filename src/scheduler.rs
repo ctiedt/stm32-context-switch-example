@@ -35,11 +35,11 @@ unsafe fn get_idle_task_ptr() -> *mut Task {
 static mut TASK_LIST: *mut Task = core::ptr::null_mut();
 
 /// Insert a new Task into the list of available Tasks.
-fn insert_task(task: *mut Task) {
-    unsafe {
-        (*task).link_to(TASK_LIST);
-        TASK_LIST = task;
-    }
+fn insert_task(mut task: Task) {
+    unsafe { task.link_to(TASK_LIST) };
+    let boxed = Box::new(task);
+    let ptr = Box::into_raw(boxed);
+    unsafe { TASK_LIST = ptr; }
 }
 
 
@@ -52,8 +52,7 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
 
     /// Create application Task and insert it into Task list.
     let app_task = Task::new(app_stack, app);
-    let app_task_ptr = Box::into_raw(Box::new(app_task));
-    insert_task(app_task_ptr);
+    insert_task(app_task);
 
     /// Set idle task as initially running Task.
     unsafe {
@@ -61,7 +60,7 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
     }
 
     /// Notify kernel to turn off privileged execution for threads.
-    enqueue_task(KernelTask::LowerThreadPrivileges).expect("failed to enqueue privilege lowering task");
+    enqueue_kernel_task(KernelTask::LowerThreadPrivileges).expect("failed to enqueue privilege lowering task");
 
     /// Start SysTick and with that preemptive scheduling.
     let mut systick = syst.counter_hz(&clocks);
@@ -90,11 +89,20 @@ pub enum KernelTask {
         /// Task to unblock.
         task: *mut Task,
     },
+    /// Start a new Task.
+    Spawn {
+        /// Handler to call.
+        f: fn(),
+        /// Start of stack memory.
+        stack: *mut u32,
+        /// Size of provided stack.
+        stack_size: usize,
+    },
 }
 
 /// Attempt to enqueue a new kernel mode task.
 /// Returns [Err] containing `task` if queue is full.
-pub fn enqueue_task(task: KernelTask) -> Result<(), KernelTask> {
+pub fn enqueue_kernel_task(task: KernelTask) -> Result<(), KernelTask> {
     unsafe { KERNEL_TASK_QUEUE.enqueue(task) }
 }
 
@@ -134,6 +142,12 @@ pub fn execute_task(task: KernelTask) -> Option<KernelTask> {
                     Some(continuation)
                 }
             }
+        }
+        KernelTask::Spawn { f, stack, stack_size } => {
+            let stack = unsafe { core::slice::from_raw_parts_mut(stack, stack_size) };
+            let task = Task::new(stack, f);
+            insert_task(task);
+            None
         }
     }
 }

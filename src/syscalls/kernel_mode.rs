@@ -4,6 +4,7 @@
 use crate::{bios, scheduler};
 use crate::scheduler::{CURRENT_TASK, KernelTask};
 use crate::syscalls::SyscallError;
+use crate::task::Task;
 use super::ReturnCode;
 
 #[naked]
@@ -61,6 +62,7 @@ pub unsafe extern fn handle_syscall(stack_pointer: *mut u32) {
         SyscallNumber::Write => handle_syscall_write(args),
         SyscallNumber::Increment => handle_syscall_increment(args),
         SyscallNumber::Block => handle_syscall_block(args),
+        SyscallNumber::Spawn => handle_syscall_spawn(args),
     }
 }
 
@@ -80,7 +82,7 @@ unsafe fn get_syscall_number(stack_pointer: *const u32) -> Option<SyscallNumber>
 
 /// Extract syscall arguments from count and pointer on stack.
 unsafe fn get_syscall_arguments(stack_pointer: *mut u32) -> &'static mut [u32] {
-    core::slice::from_raw_parts_mut(stack_pointer, 2)
+    core::slice::from_raw_parts_mut(stack_pointer, 3)
 }
 
 
@@ -105,7 +107,7 @@ unsafe fn handle_syscall_write(args: &mut [u32]) {
         data: ptr,
         task,
     };
-    match scheduler::enqueue_task(kernel_task) {
+    match scheduler::enqueue_kernel_task(kernel_task) {
         Ok(()) => {
             // Block calling thread and yield.
             (*task).set_blocked(true);
@@ -123,12 +125,29 @@ unsafe fn handle_syscall_block(args: &mut [u32]) {
     cortex_m::peripheral::SCB::set_pendsv();
 }
 
+unsafe fn handle_syscall_spawn(args: &mut [u32]) {
+    let f = core::mem::transmute(args[0]);
+    let stack = args[1] as *mut u32;
+    let stack_size = args[2] as usize;
+
+    let kernel_task = KernelTask::Spawn {
+        f,
+        stack,
+        stack_size,
+    };
+    match scheduler::enqueue_kernel_task(kernel_task) {
+        Ok(()) => args[0] = ReturnCode::Ok as u32,
+        Err(_) => args[0] = ReturnCode::Busy as u32,
+    }
+}
+
 /// Internal representation of system calls.
 #[derive(Debug)]
 pub(super) enum SyscallNumber {
     Increment,
     Write,
     Block,
+    Spawn,
 }
 
 impl SyscallNumber {
@@ -137,6 +156,7 @@ impl SyscallNumber {
             x if x == Self::Increment as u8 => Some(Self::Increment),
             x if x == Self::Write as u8 => Some(Self::Write),
             x if x == Self::Block as u8 => Some(Self::Block),
+            x if x == Self::Spawn as u8 => Some(Self::Spawn),
             other => None,
         }
     }

@@ -3,13 +3,14 @@
 //! Also returning errors in a nice format.
 //! Any validation here needs to be repeated in kernel for security.
 
+use alloc::boxed::Box;
 use crate::syscalls::decode_result;
 use super::SyscallError;
 use super::ReturnCode;
 use super::kernel_mode::SyscallNumber;
 
 macro_rules! syscall {
-    ($number:expr, $arg0:expr, $arg1:expr) => {
+    ($number:expr, $arg0:expr, $arg1:expr, $arg2:expr) => {
         unsafe {
             let mut code = 0u32;
             let mut value = 0u32;
@@ -17,6 +18,7 @@ macro_rules! syscall {
                 // Move arguments to argument registers.
                 "mov r0, {arg0}",
                 "mov r1, {arg1}",
+                "mov r2, {arg2}",
                 // Execute system call.
                 "svc {number}",
                 // Move return code and optional value into variables.
@@ -27,11 +29,13 @@ macro_rules! syscall {
                 // Tell Rust we require arg0 and arg1 in some registers.
                 arg0 = in(reg) $arg0,
                 arg1 = in(reg) $arg1,
+                arg2 = in(reg) $arg2,
                 // Also result needs to be in registers.
                 code = out(reg) code,
                 value = out(reg) value,
                 out("r0") _,
                 out("r1") _,
+                out("r2") _,
             );
             decode_result(code, value)
         }
@@ -40,7 +44,7 @@ macro_rules! syscall {
 
 /// Increment `value` by one and return it.
 pub fn increment(value: u32) -> Result<u32, SyscallError> {
-    syscall!(SyscallNumber::Increment, value, 0)
+    syscall!(SyscallNumber::Increment, value, 0, 0)
 }
 
 /// Read from USART2 into `buffer`.
@@ -48,12 +52,17 @@ pub fn increment(value: u32) -> Result<u32, SyscallError> {
 pub fn write(buffer: &[u8]) -> Result<usize, SyscallError> {
     let len = buffer.len();
     let data = buffer.as_ptr();
-    syscall!(SyscallNumber::Write, len, data).map(|a| a as usize)
+    syscall!(SyscallNumber::Write, len, data, 0).map(|a| a as usize)
 }
 
 /// Block the current Task indefinitely for debugging purposes.
 pub fn block() -> ! {
-    match syscall!(SyscallNumber::Block, 0, 0) {
+    match syscall!(SyscallNumber::Block, 0, 0, 0) {
         _ => panic!("blocked task was resumed")
     }
+}
+
+/// Start a new Task.
+pub fn spawn_task(f: fn(), stack: &mut [u32]) -> Result<(), SyscallError> {
+    syscall!(SyscallNumber::Spawn, f as u32, stack.as_mut_ptr(), stack.len()).map(|_| ())
 }

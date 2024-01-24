@@ -146,6 +146,9 @@ impl Write for BlockingWriter {
 }
 
 fn app() {
+    // Spawn blinker thread first.
+    syscalls::stubs::spawn_task(blink_task, unsafe { &mut BLINK_STACK }).expect("failed to start blink thread");
+
     let mut writer = BlockingWriter;
     let very_long_message = include_str!("text.txt");
     let mut value = 0u32;
@@ -158,10 +161,17 @@ fn app() {
             }
             Err(error) => {
                 writeln!(writer, "cannot increment: {:?}", error).unwrap();
-                writeln!(writer, "blocking thread").unwrap();
-                syscalls::stubs::block();
             }
         }
         delay(8_000_000 / 10);
     }
 }
+
+fn blink_task() {
+    loop {
+        unsafe { global_peripherals::LED.as_mut().unwrap().toggle() }
+        delay(8_000_000 / 10);
+    }
+}
+
+static mut BLINK_STACK: [u32; 128] = [0u32; 128];
