@@ -1,8 +1,8 @@
 //! Kernel-side code for system calls.
 //! Deals with reading call number and arguments from stack and executing the actual calls.
 
-use crate::bios;
-use crate::scheduler::NEXT_TASK;
+use crate::{bios, scheduler};
+use crate::scheduler::{KernelTask, NEXT_TASK};
 use crate::syscalls::SyscallError;
 use super::ReturnCode;
 
@@ -97,18 +97,22 @@ unsafe fn handle_syscall_increment(args: &mut [u32]) {
 unsafe fn handle_syscall_write(args: &mut [u32]) {
     let len = args[0] as usize;
     let ptr = args[1] as *const u8;
-    let buffer = core::slice::from_raw_parts(ptr, len);
-    let mut output = bios::buffered_output();
-    match output.append(buffer) {
-        Ok(count) => {
-            // All bytes sent, notify caller by return code.
-            args[0] = ReturnCode::Ok as u32;
-            args[1] = count as u32;
+    let task = NEXT_TASK;
+    let kernel_task = KernelTask::WriteTx {
+        args: args.as_mut_ptr(),
+        total: len,
+        left: len,
+        data: ptr,
+        task,
+    };
+    match scheduler::enqueue_task(kernel_task) {
+        Ok(()) => {
+            // Block calling thread and yield.
+            (*task).set_blocked(true);
+            cortex_m::peripheral::SCB::set_pendsv();
         }
-        Err(appended) => {
-            // Not all bytes were sent, notify caller.
-            args[0] = ReturnCode::InsufficientSpace as u32;
-            args[1] = appended as u32;
+        Err(_) => {
+            args[0] = ReturnCode::Busy as u32;
         }
     }
 }

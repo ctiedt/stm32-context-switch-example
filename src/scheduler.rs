@@ -10,6 +10,8 @@ use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::timer::{SysEvent, SysTimerExt};
 use crate::task::{Task};
 use heapless::spsc::Queue;
+use crate::bios;
+use crate::syscalls::ReturnCode;
 
 /// How many tasks may be queued for execution in kernel mode.
 const KERNEL_TASK_COUNT: usize = 16;
@@ -79,6 +81,19 @@ pub fn start(clocks: &Clocks, syst: SYST, app_stack: &mut [u32], app: impl FnOnc
 pub enum KernelTask {
     /// Switch threads to unprivileged mode.
     LowerThreadPrivileges,
+    /// Write data from a buffer to the TX buffer.
+    WriteTx {
+        /// Arguments array (on stack) of corresponding syscall.
+        args: *mut u32,
+        /// Total number of bytes to send.
+        total: usize,
+        /// Number of bytes left to send.
+        left: usize,
+        /// Start of data.
+        data: *const u8,
+        /// Task to unblock.
+        task: *mut Task,
+    },
 }
 
 /// Attempt to enqueue a new kernel mode task.
@@ -100,6 +115,31 @@ pub fn execute_task() -> bool {
             let mut control = cortex_m::register::control::read();
             control.set_npriv(Npriv::Unprivileged);
             unsafe { cortex_m::register::control::write(control); }
+        }
+        KernelTask::WriteTx { args, total, left: len, data, task } => {
+            let buffer = unsafe { core::slice::from_raw_parts(data, len) };
+            let mut tx = bios::buffered_output();
+            match tx.append(buffer) {
+                Ok(_) => unsafe {
+                    // Notify Task of success.
+                    let args = core::slice::from_raw_parts_mut(args, 2);
+                    args[0] = ReturnCode::Ok as u32;
+                    args[1] = total as u32;
+                    (*task).set_blocked(false);
+                }
+                Err(appended) => {
+                    let left = len - appended;
+                    let data = data.wrapping_add(appended);
+                    let new_task = KernelTask::WriteTx {
+                        args,
+                        total,
+                        left,
+                        data,
+                        task,
+                    };
+                    enqueue_task(new_task).expect("failed to continue write");
+                }
+            }
         }
     }
     true

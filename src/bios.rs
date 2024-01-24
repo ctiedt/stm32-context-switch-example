@@ -45,22 +45,24 @@ pub struct BufferedOutput;
 pub fn buffered_output() -> BufferedOutput { BufferedOutput }
 
 impl BufferedOutput {
-    pub unsafe fn append(&mut self, bytes: &[u8]) -> Result<usize, usize> {
-        let tx = get_raw_serial();
-        let fifo = get_raw_tx_buffer();
+    pub fn append(&mut self, bytes: &[u8]) -> Result<usize, usize> {
+        unsafe {
+            let tx = get_raw_serial();
+            let fifo = get_raw_tx_buffer();
 
-        // We need to disable our interrupt to safely access the queue.
-        disable_tx_interrupt();
-        // Await last transmission.
-        while !tx.is_tx_empty() {}
+            // We need to disable our interrupt to safely access the queue.
+            disable_tx_interrupt();
+            // Await last transmission.
+            while !tx.is_tx_empty() {}
 
-        // Append as much as possible.
-        let result = fifo.append(bytes);
+            // Append as much as possible.
+            let result = fifo.append(bytes);
 
-        // Start transmission and re-enable interrupt.
-        send_next(tx);
-        enable_tx_interrupt();
-        result
+            // Start transmission and re-enable interrupt.
+            send_next(tx);
+            enable_tx_interrupt();
+            result
+        }
     }
 }
 

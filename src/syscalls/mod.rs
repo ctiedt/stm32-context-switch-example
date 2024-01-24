@@ -27,8 +27,8 @@ pub enum ReturnCode {
     NotImplemented,
     /// Number ten was passed to Increment.
     IncrementPastTen,
-    /// Insufficient space while writing.
-    InsufficientSpace,
+    /// Kernel is busy serving other calls. Try again.
+    Busy,
 }
 
 #[derive(Debug)]
@@ -39,8 +39,8 @@ pub enum SyscallError {
     NotImplemented,
     /// Number ten was passed to Increment.
     IncrementPastTen,
-    /// Insufficient space while writing. Contains number of elements successfully written.
-    InsufficientSpace(usize),
+    /// Kernel is busy.
+    Busy,
 }
 
 /// Helper function to decode errors from an argument array.
@@ -49,7 +49,7 @@ fn decode_result(r0: u32, r1: u32) -> Result<u32, SyscallError> {
         x if x == ReturnCode::Ok as u32 => Ok(r1),
         x if x == ReturnCode::NotImplemented as u32 => Err(SyscallError::NotImplemented),
         x if x == ReturnCode::IncrementPastTen as u32 => Err(SyscallError::IncrementPastTen),
-        x if x == ReturnCode::InsufficientSpace as u32 => Err(SyscallError::InsufficientSpace(r1 as usize)),
+        x if x == ReturnCode::Busy as u32 => Err(SyscallError::Busy),
         other => Err(SyscallError::Unknown(other)),
     }
 }
