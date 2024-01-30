@@ -26,6 +26,7 @@ use cortex_m::asm::delay;
 use cortex_m::peripheral::scb::SystemHandler;
 use cortex_m_rt::{entry, exception};
 use stm32f4xx_hal::{pac::{self}, prelude::*, serial::Config};
+use stm32f4xx_hal::pac::Interrupt;
 
 mod dispatcher;
 mod task;
@@ -103,14 +104,19 @@ fn main() -> ! {
         /// This way, the dispatcher (running in PendSV and performing a context switch) can be certain
         /// that it it not interrupting another exception or interrupt and corrupt its stack.
         /// Otherwise, we could switch away during an interrupt and block it until we switch back.
-        scb.set_priority(SystemHandler::PendSV, 15);
+        scb.set_priority(SystemHandler::PendSV, 15 << 4);
         /// SysTick is next, it fires periodically and schedules the next task and requests
-        /// PendSV to run after it returns.
-        scb.set_priority(SystemHandler::SysTick, 14);
+        /// PendSV to run after it returns. Its priority is not very important, unless it is desirable
+        /// to request the next switch while one is still ongoing.
+        scb.set_priority(SystemHandler::SysTick, 14 << 4);
         /// Finally, SVCall. It serves as a ways to enter kernel mode and make system calls.
-        /// Its priority is higher than SysTick so that the currently active task (or the next) does
+        /// Its priority is higher than PendSV so that the currently active task (or the next) does
         /// not change during handling of a system call.
-        scb.set_priority(SystemHandler::SVCall, 13);
+        scb.set_priority(SystemHandler::SVCall, 15 << 4);
+    }
+    let mut nvic = cp.NVIC;
+    unsafe {
+        nvic.set_priority(Interrupt::USART2, 13 << 4);
     }
     writeln!(output, "Exception priorities configured!").unwrap();
 
