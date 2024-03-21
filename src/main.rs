@@ -74,9 +74,13 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
-    // ST-LINK Chip provides 8Mhz clock in default configuration
     let clocks = rcc.cfgr
-        .use_hse(8.MHz())
+        // Use ST-LINK's 8 MHz clock signal.
+        .use_hse(8.mhz())
+        .bypass_hse_oscillator()
+        // Set CPU clock to 8 MHz.
+        .hclk(8.MHz())
+        // Commit and switch clock configuration.
         .freeze();
 
     let gpioa = dp.GPIOA.split();
@@ -90,7 +94,6 @@ fn main() -> ! {
     writeln!(raw_serial, "Sysclock at {}, Hclock at {}", clocks.sysclk(), clocks.hclk()).unwrap();
     writeln!(raw_serial, "Initializing BIOS...").unwrap();
     bios::initialize(raw_serial);
-
 
     let mut output = bios::buffered_output();
 
